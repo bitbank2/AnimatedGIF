@@ -1,0 +1,215 @@
+#include <bb_spi_lcd.h>
+
+//#include "testimage.h"
+#include "testimage2.h"
+#include "gif.h"
+
+// Teensy 4.0
+#ifdef TEENSY
+#define CS_PIN 10
+#define DC_PIN 5
+#define RESET_PIN 6
+#else
+#define CS_PIN 4
+#define DC_PIN 2
+#define RESET_PIN 3
+#endif
+#define LED_PIN -1
+#define MISO_PIN -1
+#define MOSI_PIN -1
+#define SCK_PIN -1
+
+uint8_t ucTXBuf[1024];
+GIFIMAGE gif;
+//uint8_t ucCurrent[128*128]; // current frame
+//uint8_t ucPrevious[128*128];
+
+#ifdef FUTURE
+// Animate the new buffer into the old buffer
+void GIFDispose(GIFIMAGE *pImage)
+{
+    uint8_t *s, *d;
+    int x, y;
+
+    // Dispose of the last frame according to the previous page disposal flags
+//    switch (pImage->ucDisposalFlag)
+   switch ((pImage->cGIFBits & 0x1c)>>2)
+    {
+        case 0: // not specified - nothing to do
+        case 1: // do not dispose
+            break;
+        case 2: // restore to background color
+            for (y=pImage->iY; y < (pImage->iY + pImage->iHeight); y++)
+            {
+               d = &ucCurrent[(y * 128) + pImage->iX];
+               memset(d, pImage->cBackground, pImage->iWidth);
+            }
+            break;
+        case 3: // restore to previous frame
+            for (y=pImage->iY; y < (pImage->iY + pImage->iHeight); y++)
+            {
+              d = &ucCurrent[(y * 128) + pImage->iX];
+              s = &ucPrevious[(y * 128) + pImage->iX];
+              memcpy(d, s, pImage->iWidth);
+            }
+            break;
+        default: // not defined
+            break;
+    }
+} /* GIFDispose() */
+
+void ShowFrame(GIFIMAGE *pImage)
+{
+int x, y;
+uint8_t *s;
+uint16_t *usPalette, *usTemp = (uint16_t *)ucTXBuf;
+
+    usPalette = (pImage->bUseLocalPalette) ? pImage->pLocalPalette : pImage->pPalette;
+    for (y=pImage->iY; y<(pImage->iY+pImage->iHeight); y++)
+    {
+      spilcdSetPosition(pImage->iX, y, pImage->iWidth, 1, 1);
+      s = &ucCurrent[(y * 128)+pImage->iX];
+      // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
+      for (x=0; x<pImage->iWidth; x++)
+        usTemp[x] = usPalette[*s++];
+      spilcdWriteDataBlock((uint8_t *)usTemp, pImage->iWidth*2, 1);
+    } // for y
+} /* ShowFrame() */
+
+// Draw a line of image
+void GIFDraw(void *p)
+{
+    GIFIMAGE *pImage = (GIFIMAGE *)p;
+    uint8_t *s, *d;
+    int x, y = pImage->iY + (pImage->iHeight - pImage->iYCount); // current line
+    
+    s = pImage->ucLineBuf;
+    d = &ucCurrent[(y * 128) + pImage->iX];
+    // Apply the new pixels to the main image
+    if (pImage->cGIFBits & 1) // if transparency used
+    {
+      uint8_t c, cTransparent = pImage->cTransparent;
+      for (x=0; x<pImage->iWidth; x++)
+      {
+        c = *s++;
+        if (c != cTransparent)
+           *d = c;
+        d++;
+      }
+    }
+    else
+    {    
+      memcpy(d, s, pImage->iWidth);
+    }
+} /* GIFDraw() */
+#endif
+
+// Draw a line of image directly on the LCD
+void GIFDrawNoMem(void *p)
+{
+    GIFIMAGE *pImage = (GIFIMAGE *)p;
+    uint8_t *s;
+    uint16_t *d, *usPalette, *usTemp = (uint16_t *)ucTXBuf;
+    int x, y;
+    
+    usPalette = (pImage->bUseLocalPalette) ? pImage->pLocalPalette : pImage->pPalette;
+    y = pImage->iY + (pImage->iHeight - pImage->iYCount); // current line
+    
+    s = pImage->ucLineBuf;
+    // Apply the new pixels to the main image
+    if (pImage->cGIFBits & 1) // if transparency used
+    {
+      uint8_t *pEnd, c, cTransparent = pImage->cTransparent;
+      int x, iCount;
+      pEnd = s + pImage->iWidth;
+      x = 0;
+      iCount = 0; // count non-transparent pixels
+      while(x < pImage->iWidth)
+      {
+        c = cTransparent-1;
+        d = usTemp;
+        while (c != cTransparent && s < pEnd)
+        {
+          c = *s++;
+          if (c == cTransparent) // done, stop
+          {
+            s--; // back up to treat it like transparent
+          }
+          else // opaque
+          {
+             *d++ = usPalette[c];
+             iCount++;
+          }
+        } // while looking for opaque pixels
+        if (iCount) // any opaque pixels?
+        {
+          spilcdSetPosition(pImage->iX+x, y, iCount, 1, 1);
+          spilcdWriteDataBlock((uint8_t *)usTemp, iCount*2, 1);
+          x += iCount;
+          iCount = 0;
+        }
+        // no look for a run of transparent pixels
+        c = cTransparent;
+        while (c == cTransparent && s < pEnd)
+        {
+          c = *s++;
+          if (c == cTransparent)
+             iCount++;
+          else
+             s--; 
+        }
+        if (iCount)
+        {
+          x += iCount; // skip these
+          iCount = 0;
+        }
+      }
+    }
+    else
+    {   
+      spilcdSetPosition(pImage->iX, y, pImage->iWidth, 1, 1);
+      s = pImage->ucLineBuf;
+      // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
+      for (x=0; x<pImage->iWidth; x++)
+        usTemp[x] = usPalette[*s++];
+      spilcdWriteDataBlock((uint8_t *)usTemp, pImage->iWidth*2, 1);
+    }
+} /* GIFDrawNoMem() */
+
+void setup()
+{
+  // put your setup code here, to run once:
+  Serial.begin(115200);
+  // put your setup code here, to run once:
+  spilcdSetTXBuffer(ucTXBuf, sizeof(ucTXBuf));
+  spilcdInit(LCD_ST7735R, 0, 0, 1, 16000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN); // custom ESP32 rig
+//  spilcdSetOrientation(LCD_ORIENTATION_ROTATED);
+  spilcdFill(0,1);
+
+} /* setup() */
+
+void loop()
+{
+int rc, iFrame;
+int iTime;
+
+  GIFInit(&gif, NULL, (uint8_t *)ucGIF2, sizeof(ucGIF2));
+  iFrame = 0;
+  while (gif.GIFFile.iPos < gif.GIFFile.iSize) // go through the frames
+  {
+//    memcpy(ucPrevious, ucCurrent, sizeof(ucCurrent)); // keep last frame
+    if (GIFParseInfo(&gif))
+    {
+      iFrame++;
+      iTime = micros();
+      rc = DecodeLZW(&gif, 0);
+      iTime = micros() - iTime;
+//      Serial.printf("First frame decode time = %dus\n", iTime);
+      if (rc == 0) // decoded
+      {
+//        ShowFrame(&gif);
+//        GIFDispose(&gif); // take care of disposal flags
+      } // decoded successfully
+    } // parsed successfully
+  } // while decoding frames
+} /* loop() */
