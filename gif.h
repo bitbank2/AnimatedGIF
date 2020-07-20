@@ -13,6 +13,9 @@
 #else
 #include <Arduino.h>
 #endif // __MACH__
+#ifdef TEENSYDUINO
+#include <SD.h>
+#endif
 
 /* GIF Defines and variables */
 #define MAX_CHUNK_SIZE 255
@@ -35,6 +38,9 @@ typedef struct gif_file_tag
   int32_t iPos; // current file position
   int32_t iSize; // file size
   uint8_t *pData; // memory file pointer
+#ifdef TEENSYDUINO
+  File fHandle;
+#endif
 } GIFFILE;
 
 // Callback function prototype
@@ -49,6 +55,7 @@ typedef struct gif_image_tag
     int iWidth, iHeight, iOriginalWidth, iOriginalHeight;
     int iX, iY; // GIF corner offset
     int iBpp;
+    int iFrameDelay; // delay in milliseconds for this frame
     int iXCount, iYCount; // decoding position in image (countdown values)
     int iLZWOff; // current LZW data offset
     int iLZWSize; // current quantity of data in the LZW buffer
@@ -84,7 +91,7 @@ unsigned char * ReadGIF(GIFIMAGE *pPage, unsigned char *pData, int blob_size, in
 int AnimateGIF(GIFIMAGE *pDestPage, GIFIMAGE *pSrcPage);
 int DecodeLZW(GIFIMAGE *pImage, int iOptions);
 int GIFParseInfo(GIFIMAGE *pPage);
-void GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize);
+int GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize);
 void GIFDrawNoMem(void *p);
 
 #endif // __GIF_ANIMATOR__

@@ -10,10 +10,38 @@
 //
 
 #include "gif.h"
+#ifdef TEENSYDUINO
+#include <SD.h>
+#include <SPI.h>
+#endif
 
 static const unsigned char cGIFBits[9] = {1,4,4,4,8,8,8,8,8}; // convert odd bpp values to ones we can handle
 static const unsigned char cGIFPass[8] = {8,0,8,4,4,2,2,1}; // GIF interlaced y delta
 
+#ifdef TEENSYDUINO
+int32_t GIFReadFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen)
+{
+    int32_t iBytesRead;
+    iBytesRead = iLen;
+    if ((pFile->iSize - pFile->iPos) < iLen)
+       iBytesRead = pFile->iSize - pFile->iPos - 1;
+    if (iBytesRead <= 0)
+       return 0;
+    iBytesRead = (int32_t)pFile->fHandle.read(pBuf, iBytesRead);
+    pFile->iPos = pFile->fHandle.position();
+    return iBytesRead;
+} /* GIFReadFile() */
+
+int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition)
+{ 
+  int i = micros();
+  pFile->fHandle.seek(iPosition);
+  pFile->iPos = (int32_t)pFile->fHandle.position();
+  i = micros() - i;
+  Serial.printf("Seek time = %d us\n");
+  return pFile->iPos;
+} /* GIFSeekFile() */
+#else
 int32_t GIFReadFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen)
 {
   return 0;
@@ -23,6 +51,7 @@ int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition)
 {
   return 0;
 } /* GIFSeekFile() */
+#endif
 
 int32_t GIFReadMem(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen)
 {
@@ -44,26 +73,36 @@ int32_t GIFSeekMem(GIFFILE *pFile, int32_t iPosition)
     else if (iPosition >= pFile->iSize) iPosition = pFile->iSize-1;
     pFile->iPos = iPosition;
     return iPosition;
-} /* GIFSeekFile() */
+} /* GIFSeekMem() */
 
-
-void GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize)
+//
+// Initialize a GIF file and callback access from a file on SD or memory
+// returns 1 for success, 0 for failure
+//
+int GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize)
 {
   memset(pGIF, 0, sizeof(GIFIMAGE));
   if (szName)
   {
     pGIF->pfnSeek = GIFSeekFile;
-    pGIF->pfnRead = GIFReadFile;    
+    pGIF->pfnRead = GIFReadFile;
+#ifdef TEENSYDUINO
+    pGIF->GIFFile.fHandle = SD.open(szName, FILE_READ);
+    if (pGIF->GIFFile.fHandle == NULL)
+       return 0;
+    pGIF->GIFFile.iSize = pGIF->GIFFile.fHandle.size();
+#endif
   }
   else
   {
     pGIF->pfnSeek = GIFSeekMem;
     pGIF->pfnRead = GIFReadMem;
+    pGIF->GIFFile.iSize = iDataSize;
+    pGIF->GIFFile.pData = pData;
   }
   pGIF->pfnDraw = GIFDrawNoMem; //GIFDraw;
-  pGIF->GIFFile.iSize = iDataSize;
-  pGIF->GIFFile.pData = pData;
   pGIF->GIFFile.iPos = 0; // start of file
+  return 1;
 } /* GIFInit() */
 
 #ifdef NOT_USED
@@ -191,15 +230,20 @@ int CountGIFFrames(unsigned char *cBuf, int iFileSize, int **pOffsets)
 int GIFParseInfo(GIFIMAGE *pPage)
 {
     int i, j, iColorTableBits;
+    int iBytesRead;
     unsigned char c, *p;
     int32_t iOffset = 0;
     int32_t iStartPos = pPage->GIFFile.iPos; // starting file position
     
     pPage->bUseLocalPalette = 0; // assume no local palette
     pPage->bEndOfFrame = 0; // we're just getting started
-    
+
     p = pPage->ucFileBuf;
-    (*pPage->pfnRead)(&pPage->GIFFile, pPage->ucFileBuf, 2048); // 2k is plenty for this task
+    iBytesRead =  (*pPage->pfnRead)(&pPage->GIFFile, pPage->ucFileBuf, MAX_CHUNK_SIZE); // 255 is plenty for now
+    if (iBytesRead < 100) // we're at the end of the file
+    {
+       return 0;
+    }
     if (iStartPos == 0) // start of the file
     { // overall image size
         pPage->iOriginalWidth = pPage->iWidth = INTELSHORT(&p[6]);
@@ -210,6 +254,8 @@ int GIFParseInfo(GIFIMAGE *pPage)
         iOffset = 13;
         if (p[10] & 0x80) // global color table?
         { // convert to byte-reversed RGB565 for immediate use
+            // Read enough additional data for the color table
+            iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], 3*(1<<iColorTableBits));
             for (i=0; i<(1<<iColorTableBits); i++)
             {
                 uint16_t usRGB565;
@@ -223,6 +269,10 @@ int GIFParseInfo(GIFIMAGE *pPage)
     }
     while (p[iOffset] != ',') /* Wait for image separator */
     {
+//        if ((iBytesRead - iOffset) < 512) // read more data
+//        {
+//           iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], 512);
+//        }
         if (p[iOffset] == '!') /* Extension block */
         {
             iOffset++;
@@ -232,9 +282,9 @@ int GIFParseInfo(GIFIMAGE *pPage)
                     if (p[iOffset] == 4) // correct length
                     {
                         pPage->cGIFBits = p[iOffset+1]; // packed fields
-                        //                        pPage->iFrameDelay = (INTELSHORT(&p[iOffset+2]))*10; // delay in ms
-                        //                        if (pPage->iFrameDelay < 30) // 0-2 is going to make it run at 60fps; use 100 (10fps) as a reasonable substitute
-                        //                            pPage->iFrameDelay = 100;
+                        pPage->iFrameDelay = (INTELSHORT(&p[iOffset+2]))*10; // delay in ms
+                        if (pPage->iFrameDelay < 30) // 0-2 is going to make it run at 60fps; use 100 (10fps) as a reasonable substitute
+                           pPage->iFrameDelay = 100;
                         if (pPage->cGIFBits & 1) // transparent color is used
                             pPage->cTransparent = p[iOffset+4]; // transparent color index
                         iOffset += 6;
@@ -295,7 +345,7 @@ int GIFParseInfo(GIFIMAGE *pPage)
                     break;
                 default:
                     /* Bad header info */
-                    return NULL;
+                    return 0;
             } /* switch */
         }
         else // invalid byte, stop decoding
@@ -323,7 +373,10 @@ int GIFParseInfo(GIFIMAGE *pPage)
     pPage->cMap = p[iOffset++];
     if (pPage->cMap & 0x80) // local color table?
     {// convert to byte-reversed RGB565 for immediate use
-        for (i=0; i<(1<<((pPage->cMap & 7)+1)); i++)
+        j = (1<<((pPage->cMap & 7)+1));
+        // Read enough additional data for the color table
+        iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], j*3);            
+        for (i=0; i<j; i++)
         {
             uint16_t usRGB565;
             usRGB565 = ((p[iOffset] >> 3) << 11); // R
@@ -340,7 +393,38 @@ int GIFParseInfo(GIFIMAGE *pPage)
         pPage->iBpp = cGIFBits[pPage->cCodeStart]; // DEBUG
     // we are re-using the same buffer turning GIF file data
     // into "pure" LZW
-    (*pPage->pfnSeek)(&pPage->GIFFile, iStartPos + iOffset); // position file to new spot
+   pPage->iLZWSize = 0; // we're starting with no LZW data yet
+   c = 1; // get chunk length
+   while (c && iOffset < iBytesRead)
+   {
+//     Serial.printf("iOffset=%d, iBytesRead=%d\n", iOffset, iBytesRead);
+     c = p[iOffset++]; // get chunk length
+//     Serial.printf("Chunk size = %d\n", c);
+     if (c <= (iBytesRead - iOffset))
+     {
+       memcpy(&pPage->ucLZW[pPage->iLZWSize], &p[iOffset], c);
+       pPage->iLZWSize += c;
+       iOffset += c;
+     }
+     else // partial chunk in our buffer
+     {
+       int iPartialLen = (iBytesRead - iOffset);
+       memcpy(&pPage->ucLZW[pPage->iLZWSize], &p[iOffset], iPartialLen);
+       pPage->iLZWSize += iPartialLen;
+       iOffset += iPartialLen;
+       (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucLZW[pPage->iLZWSize], c - iPartialLen);
+       pPage->iLZWSize += (c - iPartialLen);
+     }
+     if (c == 0)
+        pPage->bEndOfFrame = 1; // signal not to read beyond the end of the frame
+   }
+// seeking on an SD card is VERY VERY SLOW, so use the data we've already read by de-chunking it
+// in this case, there's too much data, so we have to seek backwards a bit
+   if (iOffset < iBytesRead)
+   {
+//     Serial.printf("Need to seek back %d bytes\n", iBytesRead - iOffset);
+     (*pPage->pfnSeek)(&pPage->GIFFile, iStartPos + iOffset); // position file to new spot
+   }
     return 1; // we are now at the start of the chunk data
 } /* GIFParseInfo() */
 //
@@ -354,9 +438,12 @@ static int GIFGetMoreData(GIFIMAGE *pPage)
     // move any existing data down
     if (pPage->bEndOfFrame || (pPage->iLZWSize - pPage->iLZWOff) >= (LZW_BUF_SIZE - MAX_CHUNK_SIZE))
         return 1; // frame is finished or buffer is already full; no need to read more data
-    memcpy(pPage->ucLZW, &pPage->ucLZW[pPage->iLZWOff], pPage->iLZWSize - pPage->iLZWOff);
-    pPage->iLZWSize -= pPage->iLZWOff;
-    pPage->iLZWOff = 0;
+    if (pPage->iLZWOff != 0)
+    {
+      memcpy(pPage->ucLZW, &pPage->ucLZW[pPage->iLZWOff], pPage->iLZWSize - pPage->iLZWOff);
+      pPage->iLZWSize -= pPage->iLZWOff;
+      pPage->iLZWOff = 0;
+    }
     while (c && pPage->GIFFile.iPos < pPage->GIFFile.iSize && pPage->iLZWSize < (LZW_BUF_SIZE-MAX_CHUNK_SIZE))
     {
         (*pPage->pfnRead)(&pPage->GIFFile, &c, 1); // current length
@@ -431,7 +518,7 @@ unsigned char * ReadGIF(GIFIMAGE *pPage, unsigned char *pData, int blob_size, in
                     if (p[iOffset] == 4) // correct length
                     {
                         pPage->cGIFBits = p[iOffset+1]; // packed fields
-                        //                        pPage->iFrameDelay = (INTELSHORT(&p[iOffset+2]))*10; // delay in ms
+                        pPage->iFrameDelay = p[iOffset+2]*10; // delay in ms
                         //                        if (pPage->iFrameDelay < 30) // 0-2 is going to make it run at 60fps; use 100 (10fps) as a reasonable substitute
                         //                            pPage->iFrameDelay = 100;
                         if (pPage->cGIFBits & 1) // transparent color is used
@@ -748,14 +835,14 @@ int AnimateGIF(GIFIMAGE *pDestPage, GIFIMAGE *pSrcPage)
 //MakeGIFPels(code, &xcount, &y, pImage, lsize)
 static void MakeGIFPels(GIFIMAGE *pPage, unsigned int code)
 {
-    int i, k, iPixCount;
+    int iPixCount;
     unsigned short *giftabs;
     unsigned char *buf, *s, *pEnd, *gifpels;
     /* Copy this string of sequential pixels to output buffer */
     //   iPixCount = 0;
     s = pPage->ucFileBuf + FILE_BUF_SIZE; /* Pixels will come out in reversed order */
     buf = pPage->ucLineBuf + (pPage->iWidth - pPage->iXCount);
-    giftabs = &pPage->usGIFTable[CTLINK];
+    giftabs = pPage->usGIFTable;
     gifpels = &pPage->ucGIFPixels[CTLAST];
     while (code < CT_OLD)
     {
@@ -794,6 +881,7 @@ static void MakeGIFPels(GIFIMAGE *pPage, unsigned int code)
             pPage->iXCount = pPage->iWidth; /* Reset pixel count */
             (*pPage->pfnDraw)(pPage); // callback to handle this line
             pPage->iYCount--;
+            buf = pPage->ucLineBuf;
             if ((pPage->iYCount & 3) == 0) // since we support only small images...
                 GIFGetMoreData(pPage); // check if we need to read more LZW data every 4 lines
         }
@@ -810,7 +898,7 @@ int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     unsigned short oldcode, codesize, nextcode, nextlim;
     unsigned short *giftabs, cc, eoi;
     signed short sMask;
-    unsigned char *gifpels, *pOutPtr, *p;
+    unsigned char *gifpels, *p;
     //    int iStripSize;
     //unsigned char **index;
 #ifdef _64BITS
@@ -822,9 +910,7 @@ int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     // if output can be used for string table, do it faster
     //       if (bGIF && (OutPage->cBitsperpixel == 8 && ((OutPage->iWidth & 3) == 0)))
     //          return PILFastLZW(InPage, OutPage, bGIF, iOptions);
-    
-    pOutPtr = NULL; // suppress compiler warning
-    
+        
     p = pImage->ucLZW; // un-chunked LZW data
     sMask = -1 << (pImage->cCodeStart + 1);
     sMask = 0xffff - sMask;
@@ -836,14 +922,13 @@ int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     pImage->iXCount = pImage->iWidth;
     bitnum = 0;
     pImage->iLZWOff = 0; // Offset into compressed data
-    pImage->iLZWSize = 0; // no data buffered (yet)
     GIFGetMoreData(pImage); // Read some data to start
     // Initialize code table
     // this part only needs to be initialized once
     for (i = 0; i < cc; i++)
     {
         gifpels[CTFIRST + i] = gifpels[CTLAST + i] = (unsigned short) i;
-        giftabs[CTLINK + i] = CT_END;
+        giftabs[i] = CT_END;
     }
 init_codetable:
     codesize = pImage->cCodeStart + 1;
@@ -852,7 +937,7 @@ init_codetable:
     nextcode = cc + 2;
     nextlim = (unsigned short) ((1 << codesize));
     // This part of the table needs to be reset multiple times
-    memset(&giftabs[CTLINK + cc], CT_OLD, (4096 - cc)*sizeof(short));
+    memset(&giftabs[cc], CT_OLD, (4096 - cc)*sizeof(short));
     oldcode = CT_END;
     code = CT_END;
 #ifdef _64BITS
@@ -883,9 +968,9 @@ init_codetable:
             {
                 if (nextcode < nextlim) // for deferred cc case, don't let it overwrite the last entry (fff)
                 {
-                    giftabs[CTLINK + nextcode] = oldcode;
+                    giftabs[nextcode] = oldcode;
                     gifpels[CTFIRST + nextcode] = gifpels[CTFIRST + oldcode];
-                    if (giftabs[CTLINK + code] == CT_OLD) /* Old code */
+                    if (giftabs[code] == CT_OLD) /* Old code */
                         gifpels[CTLAST + nextcode] = gifpels[CTFIRST + oldcode];
                     else
                         gifpels[CTLAST + nextcode] = gifpels[CTFIRST + code];

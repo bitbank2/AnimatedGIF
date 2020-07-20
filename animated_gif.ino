@@ -4,12 +4,21 @@
 #include "testimage2.h"
 #include "gif.h"
 
+// Files on SD card
+// /GIF/homer.gif
+// /GIF/tt.gif
+// /GIF/bigbuck.gif
+// /GIF/futurama.gif
+
 // Teensy 4.0
-#ifdef TEENSY
+#ifdef TEENSYDUINO
 #define CS_PIN 10
-#define DC_PIN 5
-#define RESET_PIN 6
+#define DC_PIN 9
+#define RESET_PIN 8
 #else
+//#define CS_PIN -1
+//#define DC_PIN 0
+//#define RESET_PIN 1
 #define CS_PIN 4
 #define DC_PIN 2
 #define RESET_PIN 3
@@ -180,10 +189,24 @@ void setup()
 {
   // put your setup code here, to run once:
   Serial.begin(115200);
+
+#ifdef TEENSYDUINO
+  if(!SD.begin(BUILTIN_SDCARD))
+  {
+    Serial.println("SD Card mount failed!");
+    return;
+  }
+  else
+  {
+    Serial.println("SD Card mount succeeded!");
+  }
+#endif
+
   // put your setup code here, to run once:
   spilcdSetTXBuffer(ucTXBuf, sizeof(ucTXBuf));
-  spilcdInit(LCD_ST7735R, 0, 0, 1, 16000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN); // custom ESP32 rig
-//  spilcdSetOrientation(LCD_ORIENTATION_ROTATED);
+  spilcdInit(LCD_ILI9341, 0, 0, 0, 30000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN);
+//  spilcdInit(LCD_ST7735R, 0, 0, 1, 8000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN); // custom ESP32 rig
+  spilcdSetOrientation(LCD_ORIENTATION_ROTATED);
   spilcdFill(0,1);
 
 } /* setup() */
@@ -193,23 +216,38 @@ void loop()
 int rc, iFrame;
 int iTime;
 
-  GIFInit(&gif, NULL, (uint8_t *)ucGIF2, sizeof(ucGIF2));
+//  GIFInit(&gif, NULL, (uint8_t *)ucGIF2, sizeof(ucGIF2));
+  if (!GIFInit(&gif, "/GIF/FUTURAMA.GIF", NULL, 0))
+  {
+     Serial.println("GIFInit failed!");
+     while (1);
+  }
+  Serial.printf("File size = %d\n", gif.GIFFile.iSize);
   iFrame = 0;
-  while (gif.GIFFile.iPos < gif.GIFFile.iSize) // go through the frames
+  while (gif.GIFFile.iPos < gif.GIFFile.iSize-1) // go through the frames
   {
 //    memcpy(ucPrevious, ucCurrent, sizeof(ucCurrent)); // keep last frame
     if (GIFParseInfo(&gif))
     {
       iFrame++;
-      iTime = micros();
+      iTime = millis();
       rc = DecodeLZW(&gif, 0);
-      iTime = micros() - iTime;
-//      Serial.printf("First frame decode time = %dus\n", iTime);
+      iTime = millis() - iTime;
+      if (iTime < gif.iFrameDelay) // need to pause a bit
+         delay(gif.iFrameDelay - iTime);
+      Serial.printf("frame decode time = %dms\n", iTime);
       if (rc == 0) // decoded
       {
 //        ShowFrame(&gif);
 //        GIFDispose(&gif); // take care of disposal flags
       } // decoded successfully
     } // parsed successfully
+    else
+    {
+      Serial.printf("GIFParse failed at frame %d\n", iFrame);
+      delay(10000);
+    }
   } // while decoding frames
+  Serial.printf("Frame count = %d\n", iFrame);
+  delay(5000);
 } /* loop() */
