@@ -1,7 +1,8 @@
 #include <bb_spi_lcd.h>
 
-//#include "testimage.h"
-#include "testimage2.h"
+#include "testimage.h"
+//#include "testimage2.h"
+#include "testimage3.h"
 #include "gif.h"
 
 // Files on SD card
@@ -15,18 +16,35 @@
 #define CS_PIN 10
 #define DC_PIN 9
 #define RESET_PIN 8
+#define LED_PIN -1
 #else
 //#define CS_PIN -1
 //#define DC_PIN 0
 //#define RESET_PIN 1
+//#define CS_PIN 4
+//#define DC_PIN 2
+//#define RESET_PIN 3
+//#define LED_PIN -1
+// TTGO T-Camera Plus
+//#define CS_PIN 12
+//#define DC_PIN 15
+//#define LED_PIN 2
+//#define BUILTIN_SDCARD 0
+//#define RESET_PIN -1
+//#define MISO_PIN 22
+//#define MOSI_PIN 19
+//#define SCK_PIN 21
+// Janzen Hub
 #define CS_PIN 4
-#define DC_PIN 2
-#define RESET_PIN 3
+#define DC_PIN 12
+#define LED_PIN 16
+#define BUILTIN_SDCARD 0
+#define RESET_PIN -1
+#define MISO_PIN 19
+#define MOSI_PIN 23
+#define SCK_PIN 18
+
 #endif
-#define LED_PIN -1
-#define MISO_PIN -1
-#define MOSI_PIN -1
-#define SCK_PIN -1
 
 uint8_t ucTXBuf[1024];
 GIFIMAGE gif;
@@ -120,7 +138,7 @@ void GIFDrawNoMem(void *p)
     uint8_t *s;
     uint16_t *d, *usPalette, *usTemp = (uint16_t *)ucTXBuf;
     int x, y;
-    
+   
     usPalette = (pImage->bUseLocalPalette) ? pImage->pLocalPalette : pImage->pPalette;
     y = pImage->iY + (pImage->iHeight - pImage->iYCount); // current line
     
@@ -190,25 +208,26 @@ void setup()
   // put your setup code here, to run once:
   Serial.begin(115200);
 
-#ifdef TEENSYDUINO
-  if(!SD.begin(BUILTIN_SDCARD))
-  {
-    Serial.println("SD Card mount failed!");
-    return;
-  }
-  else
-  {
-    Serial.println("SD Card mount succeeded!");
-  }
-#endif
+//SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN, -1);
+//#ifdef TEENSYDUINO
+//  if(!SD.begin(BUILTIN_SDCARD))
+//  {
+//    Serial.println("SD Card mount failed!");
+//    return;
+//  }
+//  else
+//  {
+//    Serial.println("SD Card mount succeeded!");
+//  }
+//#endif
 
   // put your setup code here, to run once:
   spilcdSetTXBuffer(ucTXBuf, sizeof(ucTXBuf));
-  spilcdInit(LCD_ILI9341, 0, 0, 0, 30000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN);
+//  spilcdInit(LCD_ST7789, 0, 0, 0, 32000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN);
+  spilcdInit(LCD_ILI9341, 0, 0, 0, 40000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN);
 //  spilcdInit(LCD_ST7735R, 0, 0, 1, 8000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN); // custom ESP32 rig
   spilcdSetOrientation(LCD_ORIENTATION_ROTATED);
   spilcdFill(0,1);
-
 } /* setup() */
 
 void loop()
@@ -216,8 +235,8 @@ void loop()
 int rc, iFrame;
 int iTime;
 
-//  GIFInit(&gif, NULL, (uint8_t *)ucGIF2, sizeof(ucGIF2));
-  if (!GIFInit(&gif, "/GIF/FUTURAMA.GIF", NULL, 0))
+  if (!GIFInit(&gif, NULL, (uint8_t *)ucGIF3, sizeof(ucGIF3)))
+//  if (!GIFInit(&gif, "/GIF/FUTURAMA.GIF", NULL, 0))
   {
      Serial.println("GIFInit failed!");
      while (1);
@@ -248,6 +267,7 @@ int iTime;
       delay(10000);
     }
   } // while decoding frames
+  GIFTerminate(&gif);
   Serial.printf("Frame count = %d\n", iFrame);
-  delay(5000);
+//  delay(5000);
 } /* loop() */

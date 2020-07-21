@@ -10,21 +10,22 @@
 //
 
 #include "gif.h"
-#ifdef TEENSYDUINO
+//#ifdef TEENSYDUINO
 #include <SD.h>
 #include <SPI.h>
-#endif
+//#endif
 
 static const unsigned char cGIFBits[9] = {1,4,4,4,8,8,8,8,8}; // convert odd bpp values to ones we can handle
 static const unsigned char cGIFPass[8] = {8,0,8,4,4,2,2,1}; // GIF interlaced y delta
 
-#ifdef TEENSYDUINO
+//#ifndef TEENSYDUINO
 int32_t GIFReadFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen)
 {
     int32_t iBytesRead;
     iBytesRead = iLen;
+    // Note: If you read a file all the way to the last byte, seek() stops working
     if ((pFile->iSize - pFile->iPos) < iLen)
-       iBytesRead = pFile->iSize - pFile->iPos - 1;
+       iBytesRead = pFile->iSize - pFile->iPos - 1; // <-- ugly work-around
     if (iBytesRead <= 0)
        return 0;
     iBytesRead = (int32_t)pFile->fHandle.read(pBuf, iBytesRead);
@@ -38,10 +39,11 @@ int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition)
   pFile->fHandle.seek(iPosition);
   pFile->iPos = (int32_t)pFile->fHandle.position();
   i = micros() - i;
-  Serial.printf("Seek time = %d us\n");
+  Serial.printf("Seek time = %d us\n", i);
   return pFile->iPos;
 } /* GIFSeekFile() */
-#else
+//#else
+#ifdef BOGUS
 int32_t GIFReadFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen)
 {
   return 0;
@@ -86,12 +88,12 @@ int GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize)
   {
     pGIF->pfnSeek = GIFSeekFile;
     pGIF->pfnRead = GIFReadFile;
-#ifdef TEENSYDUINO
-    pGIF->GIFFile.fHandle = SD.open(szName, FILE_READ);
+//#ifdef TEENSYDUINO
+    pGIF->GIFFile.fHandle = SD.open(szName);
     if (pGIF->GIFFile.fHandle == NULL)
        return 0;
     pGIF->GIFFile.iSize = pGIF->GIFFile.fHandle.size();
-#endif
+//#endif
   }
   else
   {
@@ -105,6 +107,11 @@ int GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize)
   return 1;
 } /* GIFInit() */
 
+void GIFTerminate(GIFIMAGE *pGIF)
+{
+  if (pGIF->pfnSeek != GIFSeekMem) // must be a file
+     pGIF->GIFFile.fHandle.close();
+} /* GIFTerminate() */
 #ifdef NOT_USED
 //
 // CountGIFFrames
@@ -843,7 +850,7 @@ static void MakeGIFPels(GIFIMAGE *pPage, unsigned int code)
     s = pPage->ucFileBuf + FILE_BUF_SIZE; /* Pixels will come out in reversed order */
     buf = pPage->ucLineBuf + (pPage->iWidth - pPage->iXCount);
     giftabs = pPage->usGIFTable;
-    gifpels = &pPage->ucGIFPixels[CTLAST];
+    gifpels = &pPage->ucGIFPixels[PIXEL_LAST];
     while (code < CT_OLD)
     {
         if (s == pPage->ucFileBuf) /* Houston, we have a problem */
@@ -927,7 +934,7 @@ int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     // this part only needs to be initialized once
     for (i = 0; i < cc; i++)
     {
-        gifpels[CTFIRST + i] = gifpels[CTLAST + i] = (unsigned short) i;
+        gifpels[PIXEL_FIRST + i] = gifpels[PIXEL_LAST + i] = (unsigned short) i;
         giftabs[i] = CT_END;
     }
 init_codetable:
@@ -969,11 +976,11 @@ init_codetable:
                 if (nextcode < nextlim) // for deferred cc case, don't let it overwrite the last entry (fff)
                 {
                     giftabs[nextcode] = oldcode;
-                    gifpels[CTFIRST + nextcode] = gifpels[CTFIRST + oldcode];
+                    gifpels[PIXEL_FIRST + nextcode] = gifpels[PIXEL_FIRST + oldcode];
                     if (giftabs[code] == CT_OLD) /* Old code */
-                        gifpels[CTLAST + nextcode] = gifpels[CTFIRST + oldcode];
+                        gifpels[PIXEL_LAST + nextcode] = gifpels[PIXEL_FIRST + oldcode];
                     else
-                        gifpels[CTLAST + nextcode] = gifpels[CTFIRST + code];
+                        gifpels[PIXEL_LAST + nextcode] = gifpels[PIXEL_FIRST + code];
                 }
                 nextcode++;
                 if (nextcode >= nextlim && codesize < 12)

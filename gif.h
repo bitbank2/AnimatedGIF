@@ -13,9 +13,9 @@
 #else
 #include <Arduino.h>
 #endif // __MACH__
-#ifdef TEENSYDUINO
+//#ifdef TEENSYDUINO
 #include <SD.h>
-#endif
+//#endif
 
 /* GIF Defines and variables */
 #define MAX_CHUNK_SIZE 255
@@ -24,9 +24,8 @@
 #define MAX_WIDTH 320
 #define FILE_BUF_SIZE 4096
 
-#define CTLINK 0
-#define CTFIRST 0
-#define CTLAST 4096
+#define PIXEL_FIRST 0
+#define PIXEL_LAST 4096
 #define CT_OLD 5911 // 0x1717 to use memset
 #define CT_END 5912
 #define MAX_HASH 5003
@@ -38,9 +37,9 @@ typedef struct gif_file_tag
   int32_t iPos; // current file position
   int32_t iSize; // file size
   uint8_t *pData; // memory file pointer
-#ifdef TEENSYDUINO
+//#ifdef TEENSYDUINO
   File fHandle;
-#endif
+//#endif
 } GIFFILE;
 
 // Callback function prototype
@@ -92,6 +91,7 @@ int AnimateGIF(GIFIMAGE *pDestPage, GIFIMAGE *pSrcPage);
 int DecodeLZW(GIFIMAGE *pImage, int iOptions);
 int GIFParseInfo(GIFIMAGE *pPage);
 int GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize);
+void GIFTerminate(GIFIMAGE *pGIF);
 void GIFDrawNoMem(void *p);
 
 #endif // __GIF_ANIMATOR__
