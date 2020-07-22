@@ -51,7 +51,7 @@ typedef void (GIF_DRAW_CALLBACK)(void *);
 //
 typedef struct gif_image_tag
 {
-    int iWidth, iHeight, iOriginalWidth, iOriginalHeight;
+    int iWidth, iHeight, iCanvasWidth, iCanvasHeight;
     int iX, iY; // GIF corner offset
     int iBpp;
     int iFrameDelay; // delay in milliseconds for this frame
@@ -89,7 +89,7 @@ int CountGIFFrames(unsigned char *cBuf, int iFileSize, int **pOffsets);
 unsigned char * ReadGIF(GIFIMAGE *pPage, unsigned char *pData, int blob_size, int *size_out, int *pOffsets, int iRequestedPage);
 int AnimateGIF(GIFIMAGE *pDestPage, GIFIMAGE *pSrcPage);
 int DecodeLZW(GIFIMAGE *pImage, int iOptions);
-int GIFParseInfo(GIFIMAGE *pPage);
+int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly);
 int GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize);
 void GIFTerminate(GIFIMAGE *pGIF);
 void GIFDrawNoMem(void *p);

@@ -80,6 +80,7 @@ int32_t GIFSeekMem(GIFFILE *pFile, int32_t iPosition)
 //
 // Initialize a GIF file and callback access from a file on SD or memory
 // returns 1 for success, 0 for failure
+// Fills in the canvas size of the GIFIMAGE structure
 //
 int GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize)
 {
@@ -90,7 +91,7 @@ int GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize)
     pGIF->pfnRead = GIFReadFile;
 //#ifdef TEENSYDUINO
     pGIF->GIFFile.fHandle = SD.open(szName);
-    if (pGIF->GIFFile.fHandle == NULL)
+    if (pGIF->GIFFile.fHandle == 0)
        return 0;
     pGIF->GIFFile.iSize = pGIF->GIFFile.fHandle.size();
 //#endif
@@ -104,6 +105,8 @@ int GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize)
   }
   pGIF->pfnDraw = GIFDrawNoMem; //GIFDraw;
   pGIF->GIFFile.iPos = 0; // start of file
+  GIFParseInfo(pGIF, 1); // gather info for the first page
+  (*pGIF->pfnSeek)(&pGIF->GIFFile, 0); // seek back to start of the file
   return 1;
 } /* GIFInit() */
 
@@ -232,30 +235,37 @@ int CountGIFFrames(unsigned char *cBuf, int iFileSize, int **pOffsets)
 #endif // NOT_USED
 //
 // Parse the GIF header, gather the size and palette info
+// If called with bInfoOnly set to true, it will test for a valid file
+// and return the canvas size only
 // Returns 1 for success, 0 for failure
 //
-int GIFParseInfo(GIFIMAGE *pPage)
+int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
 {
     int i, j, iColorTableBits;
     int iBytesRead;
     unsigned char c, *p;
     int32_t iOffset = 0;
     int32_t iStartPos = pPage->GIFFile.iPos; // starting file position
+    int iReadSize;
     
     pPage->bUseLocalPalette = 0; // assume no local palette
     pPage->bEndOfFrame = 0; // we're just getting started
-
+    iReadSize = (bInfoOnly) ? 12 : MAX_CHUNK_SIZE;
     p = pPage->ucFileBuf;
-    iBytesRead =  (*pPage->pfnRead)(&pPage->GIFFile, pPage->ucFileBuf, MAX_CHUNK_SIZE); // 255 is plenty for now
-    if (iBytesRead < 100) // we're at the end of the file
+    iBytesRead =  (*pPage->pfnRead)(&pPage->GIFFile, pPage->ucFileBuf, iReadSize); // 255 is plenty for now
+    if (iBytesRead != iReadSize) // we're at the end of the file
     {
        return 0;
     }
     if (iStartPos == 0) // start of the file
-    { // overall image size
-        pPage->iOriginalWidth = pPage->iWidth = INTELSHORT(&p[6]);
-        pPage->iOriginalHeight = pPage->iHeight = INTELSHORT(&p[8]);
+    { // canvas size
+        if (memcmp(p, "GIF89", 5) != 0 && memcmp(p, "GIF87", 5) != 0) // not a GIF file
+           return 0; 
+        pPage->iCanvasWidth = pPage->iWidth = INTELSHORT(&p[6]);
+        pPage->iCanvasHeight = pPage->iHeight = INTELSHORT(&p[8]);
         pPage->iBpp = ((p[10] & 0x70) >> 4) + 1;
+        if (bInfoOnly)
+           return 1; // we've got the info we needed, leave
         iColorTableBits = (p[10] & 7) + 1; // Log2(size) of the color table
         pPage->cBackground = p[11]; // background color
         iOffset = 13;
@@ -895,6 +905,13 @@ static void MakeGIFPels(GIFIMAGE *pPage, unsigned int code)
     } /* while */
     return;
 } /* MakeGIFPels() */
+//
+// Macro to extract a variable length code
+//
+#define GET_CODE if (bitnum > (REGISTER_WIDTH - codesize)) { pImage->iLZWOff += (bitnum >> 3); \
+            bitnum &= 7; ulBits = INTELLONG(&p[pImage->iLZWOff]); } \
+        code = (unsigned short) (ulBits >> bitnum); /* Read a 32-bit chunk */ \
+        code &= sMask; bitnum += codesize;
 
 //
 // Decode LZW into an image
@@ -908,11 +925,7 @@ int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     unsigned char *gifpels, *p;
     //    int iStripSize;
     //unsigned char **index;
-#ifdef _64BITS
-    uint64_t ulBits;
-#else
     uint32_t ulBits;
-#endif
     unsigned short code;
     // if output can be used for string table, do it faster
     //       if (bGIF && (OutPage->cBitsperpixel == 8 && ((OutPage->iWidth & 3) == 0)))
@@ -945,34 +958,22 @@ init_codetable:
     nextlim = (unsigned short) ((1 << codesize));
     // This part of the table needs to be reset multiple times
     memset(&giftabs[cc], CT_OLD, (4096 - cc)*sizeof(short));
-    oldcode = CT_END;
-    code = CT_END;
-#ifdef _64BITS
-    ulBits = INTELEXTRALONG(&p[pImage->iLZWOff]);
-#else
-    ulBits = INTELLONG(&p[pImage->iLZWOff]);
-#endif
+    ulBits = INTELLONG(&p[pImage->iLZWOff]); // start by reading 4 bytes of LZW data
+    GET_CODE
+    if (code == cc) // we just reset the dictionary, so get another code
+    {
+      GET_CODE
+    }
+    oldcode = code;
+    MakeGIFPels(pImage, code); // first code is output as the first pixel
+    // Main decode loop
     while (code != eoi && pImage->iYCount > 0) // && y < pImage->iHeight+1) /* Loop through all lines of the image (or strip) */
     {
-        if (bitnum > (REGISTER_WIDTH - codesize))
-        {
-            pImage->iLZWOff += (bitnum >> 3);
-            bitnum &= 7;
-#ifdef _64BITS
-            ulBits = INTELEXTRALONG(&p[pImage->iLZWOff]);
-#else
-            ulBits = INTELLONG(&p[pImage->iLZWOff]);
-#endif
-        }
-        code = (unsigned short) (ulBits >> bitnum); /* Read a 32-bit chunk */
-        code &= sMask;
-        bitnum += codesize;
+        GET_CODE
         if (code == cc) /* Clear code?, and not first code */
             goto init_codetable;
         if (code != eoi)
         {
-            if (oldcode != CT_END)
-            {
                 if (nextcode < nextlim) // for deferred cc case, don't let it overwrite the last entry (fff)
                 {
                     giftabs[nextcode] = oldcode;
@@ -989,10 +990,7 @@ init_codetable:
                     nextlim <<= 1;
                     sMask = (sMask << 1) | 1;
                 }
-            }
             MakeGIFPels(pImage, code);
-//            if (buf == NULL)
-//                goto gif_forced_error; /* Leave with error */
             oldcode = code;
         }
     } /* while not end of LZW code stream */

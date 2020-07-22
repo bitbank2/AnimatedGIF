@@ -1,6 +1,6 @@
 #include <bb_spi_lcd.h>
 
-#include "testimage.h"
+//#include "testimage.h"
 //#include "testimage2.h"
 #include "testimage3.h"
 #include "gif.h"
@@ -43,7 +43,14 @@
 #define MISO_PIN 19
 #define MOSI_PIN 23
 #define SCK_PIN 18
-
+// Feather M0 proto
+//#define CS_PIN 10
+//#define DC_PIN 11
+//#define LED_PIN -1
+//#define RESET_PIN 9
+//#define MISO_PIN -1
+//#define MOSI_PIN -1
+//#define SCK_PIN -1
 #endif
 
 uint8_t ucTXBuf[1024];
@@ -175,7 +182,7 @@ void GIFDrawNoMem(void *p)
           x += iCount;
           iCount = 0;
         }
-        // no look for a run of transparent pixels
+        // no, look for a run of transparent pixels
         c = cTransparent;
         while (c == cTransparent && s < pEnd)
         {
@@ -226,6 +233,7 @@ void setup()
 //  spilcdInit(LCD_ST7789, 0, 0, 0, 32000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN);
   spilcdInit(LCD_ILI9341, 0, 0, 0, 40000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN);
 //  spilcdInit(LCD_ST7735R, 0, 0, 1, 8000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN); // custom ESP32 rig
+//  spilcdInit(LCD_ST7735R, 0, 0, 1, 12000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN); // custom ESP32 rig
   spilcdSetOrientation(LCD_ORIENTATION_ROTATED);
   spilcdFill(0,1);
 } /* setup() */
@@ -241,12 +249,12 @@ int iTime;
      Serial.println("GIFInit failed!");
      while (1);
   }
-  Serial.printf("File size = %d\n", gif.GIFFile.iSize);
+  Serial.printf("File size = %d, Canvas size = %d x %d\n", gif.GIFFile.iSize, gif.iCanvasWidth, gif.iCanvasHeight);
   iFrame = 0;
   while (gif.GIFFile.iPos < gif.GIFFile.iSize-1) // go through the frames
   {
 //    memcpy(ucPrevious, ucCurrent, sizeof(ucCurrent)); // keep last frame
-    if (GIFParseInfo(&gif))
+    if (GIFParseInfo(&gif, 0))
     {
       iFrame++;
       iTime = millis();
