@@ -1,21 +1,14 @@
-#ifndef __GIF_ANIMATOR__
-#define __GIF_ANIMATOR__
+#ifndef __ANIMATEDGIF__
+#define __ANIMATEDGIF__
+#include <Arduino.h>
 //
 // GIF Animator
 // Written by Larry Bank
+// Copyright (c) 2020 BitBank Software, Inc.
+// 
 // Designed to decode images up to 480x320
-// using less than 20K of RAM
-#include <stdint.h>
-#ifdef __MACH__
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-#else
-#include <Arduino.h>
-#endif // __MACH__
-//#ifdef TEENSYDUINO
-#include <SD.h>
-//#endif
+// using less than 22K of RAM
+//
 
 /* GIF Defines and variables */
 #define MAX_CHUNK_SIZE 255
@@ -26,28 +19,45 @@
 
 #define PIXEL_FIRST 0
 #define PIXEL_LAST 4096
-#define CT_OLD 5911 // 0x1717 to use memset
-#define CT_END 5912
+#define LINK_UNUSED 5911 // 0x1717 to use memset
+#define LINK_END 5912
 #define MAX_HASH 5003
 #define MAXMAXCODE 4096
 
+// RGB565 pixel byte order in the palette
+#define BIG_ENDIAN_PIXELS 0
+#define LITTLE_ENDIAN_PIXELS 1
 
 typedef struct gif_file_tag
 {
   int32_t iPos; // current file position
   int32_t iSize; // file size
   uint8_t *pData; // memory file pointer
-//#ifdef TEENSYDUINO
-  File fHandle;
-//#endif
+  void * fHandle; // class pointer to File/SdFat or whatever you want
 } GIFFILE;
 
-// Callback function prototype
+typedef struct gif_draw_tag
+{
+    int iX, iY; // Corner offset of this frame on the canvas
+    int y; // current line being drawn (0 = top line of image)
+    int iWidth; // width of the current line
+    uint8_t *pPixels; // 8-bit source pixels for this line
+    uint16_t *pPalette; // little or big-endian RGB565 palette entries
+    uint8_t ucTransparent; // transparent color
+    uint8_t ucHasTransparency; // flag indicating the transparent color is in use
+    uint8_t ucDisposalMethod; // frame disposal method
+    uint8_t ucBackground; // background color
+} GIFDRAW;
+
+// Callback function prototypes
 typedef int32_t (GIF_READ_CALLBACK)(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 typedef int32_t (GIF_SEEK_CALLBACK)(GIFFILE *pFile, int32_t iPosition);
-typedef void (GIF_DRAW_CALLBACK)(void *);
+typedef void (GIF_DRAW_CALLBACK)(GIFDRAW *pDraw);
+typedef void * (GIF_OPEN_CALLBACK)(char *szFilename, int32_t *pFileSize);
+typedef void (GIF_CLOSE_CALLBACK)(GIFFILE *pFile);
+
 //
-// our private structure to hold a GIF image and its info
+// our private structure to hold a GIF image decode state
 //
 typedef struct gif_image_tag
 {
@@ -61,6 +71,8 @@ typedef struct gif_image_tag
     GIF_READ_CALLBACK *pfnRead;
     GIF_SEEK_CALLBACK *pfnSeek;
     GIF_DRAW_CALLBACK *pfnDraw;
+    GIF_OPEN_CALLBACK *pfnOpen;
+    GIF_CLOSE_CALLBACK *pfnClose;
     GIFFILE GIFFile;
     unsigned char *pPixels, *pOldPixels;
     unsigned char ucLineBuf[MAX_WIDTH]; // current line
@@ -71,9 +83,27 @@ typedef struct gif_image_tag
     unsigned short usGIFTable[4096];
     unsigned char ucGIFPixels[8192];
     unsigned char bEndOfFrame;
-    unsigned char cGIFBits, cBackground, cTransparent, cCodeStart, cMap, bUseLocalPalette;
+    unsigned char ucGIFBits, ucBackground, ucTransparent, ucCodeStart, ucMap, bUseLocalPalette, ucLittleEndian;
 } GIFIMAGE;
 
+//
+// The GIF class wraps portable C code which does the actual work
+//
+class AnimatedGIF
+{
+  public:
+    int open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw);
+    int open(char *szFilename, GIF_OPEN_CALLBACK *pfnOpen, GIF_CLOSE_CALLBACK *pfnClose, GIF_READ_CALLBACK *pfnRead, GIF_SEEK_CALLBACK *pfnSeek, GIF_DRAW_CALLBACK *pfnDraw);
+    void close();
+    void reset();
+    void begin(int iEndian);
+    int playFrame(bool bSync);
+    int getCanvasWidth();
+    int getCanvasHeight();
+
+  private:
+    GIFIMAGE _gif;
+};
 
 // Due to unaligned memory causing an exception, we have to do these macros the slow way
 #define INTELSHORT(p) ((*p) + (*(p+1)<<8))
@@ -84,14 +114,4 @@ typedef struct gif_image_tag
 // Must be a 32-bit target processor
 #define REGISTER_WIDTH 32
 
-// API
-int CountGIFFrames(unsigned char *cBuf, int iFileSize, int **pOffsets);
-unsigned char * ReadGIF(GIFIMAGE *pPage, unsigned char *pData, int blob_size, int *size_out, int *pOffsets, int iRequestedPage);
-int AnimateGIF(GIFIMAGE *pDestPage, GIFIMAGE *pSrcPage);
-int DecodeLZW(GIFIMAGE *pImage, int iOptions);
-int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly);
-int GIFInit(GIFIMAGE *pGIF, char *szName, uint8_t *pData, int iDataSize);
-void GIFTerminate(GIFIMAGE *pGIF);
-void GIFDrawNoMem(void *p);
-
-#endif // __GIF_ANIMATOR__
+#endif // __ANIMATEDGIF__
