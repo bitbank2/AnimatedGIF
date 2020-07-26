@@ -97,7 +97,7 @@ class AnimatedGIF
     void close();
     void reset();
     void begin(int iEndian);
-    int playFrame(bool bSync);
+    int playFrame(bool bSync, int *delayMilliseconds);
     int getCanvasWidth();
     int getCanvasHeight();
 

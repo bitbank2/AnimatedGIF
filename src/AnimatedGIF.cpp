@@ -122,7 +122,7 @@ void AnimatedGIF::begin(int iEndian)
 // 1 = good result and more frames exist
 // 0 = good result and no more frames exist
 // -1 = error
-int AnimatedGIF::playFrame(bool bSync)
+int AnimatedGIF::playFrame(bool bSync, int *delayMilliseconds)
 {
 int rc;
 long lTime = millis();
@@ -148,6 +148,8 @@ long lTime = millis();
         if (lTime < _gif.iFrameDelay) // need to pause a bit
            delay(_gif.iFrameDelay - lTime);
     }
+    if (delayMilliseconds) // if not NULL, return the frame delay time
+        *delayMilliseconds = _gif.iFrameDelay;
     return (_gif.GIFFile.iPos < _gif.GIFFile.iSize-1);
 } /* playFrame() */
 //

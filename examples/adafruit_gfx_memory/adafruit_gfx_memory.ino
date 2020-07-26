@@ -125,7 +125,7 @@ void loop() {
   if (gif.open((uint8_t *)ucBadgers, sizeof(ucBadgers), GIFDraw))
   {
     Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
-    while (gif.playFrame(true))
+    while (gif.playFrame(true, NULL))
     {      
     }
     gif.close();
