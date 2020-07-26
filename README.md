@@ -34,7 +34,9 @@ You'll notice that the images provided in the test_images folder have been turne
 The Callback functions:<br>
 -----------------------<br>
 One of the reasons that this is apparently the first universal GIF library for Arduino is because the lack of available RAM and myriad display options would make it difficult to support all MCUs and displays properly. I decided that to solve this issue, I would isolate the GIF decoding from the display and file I/O with callback functions. This allows the core code to run on any system, but you need to help it a little. At a minimum, your code must provide a function to draw (or store) each scan line of image. If you're playing a GIF file from memory, this is the only function you need to provide. In the examples folder there are multiple sketches to show how this is done on various display libraries. For reading from SD cards, 4 other functions must be provided: open, close, read, seek. There is an example for implementing these in the examples folder as well.<br>
-
+**Note**:<br>
+If you're using the ESP32 or ESP8266 and playing GIF images stored in RAM, you'll need to provide the 4 file callback functions or modify the existing ones because RAM and FLASH are in different adddress spaces (Harvard architecture). The code assumes the source of the GIF data is in FLASH and uses memcpy_P() instead of memcpy() to access it.<br>
+<br>
 The API:<br>
 --------<br>
 Please consult the Wiki for detailed info about each method exposed by the AnimatedGIF class.<br>
