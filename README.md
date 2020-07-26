@@ -12,6 +12,10 @@ Limitations<br>
 -----------<br>
 To save memory, the code limits the maximum image width to 320 pixels. This is just a constant defined in AnimatedGIF.h, so you can set it larger if you like. Animated GIF images have a lot of options to save space when encoding the changes from frame to frame. Many of the tools which generate animated GIFs don't make use of every option and that's helpful because the frame disposal options are not supported in the library code. They can be implemented in your drawing callback if you want. The reason they're not provided with this code is because one of the image disposal options requires you to keep an entire copy of the previous frame and this would prevent it from working on low memory MCUs. If would also require dynamic memory allocation which is another area I avoided with this code.<br>
 
+Designed for Speed<br>
+------------------<br>
+My work is always focused on code optimization, so this project is no different. I've profiled this code and optimized it for 32-bit CPUs. I discovered while testing it that seeking on micro SD cards (on Arduino) is very very slow. I had to use a little extra RAM to buffer incoming data to avoid seeking. The code does need to seek, but it's done very rarely. I also wrote code to buffer and de-chunk some of the incoming LZW data to avoid checking for chunk boundaries in the inner decode loop. There are a number of clever optimizations that should allow this to run faster than any existing GIF solutions on Arduino boards. The speed gained from my decoder will be lost if it takes too long to display the pixels. For this reason, the GIFDRAW callback passes an RGB565 palette in the byte order of your choosing and the example sketches uses functions to write entire lines of pixels to the SPI TFT displays in a single shot. If you implement your own GIFDRAW callback and have to pass 1 pixel at a time to whatever display device you're using, this will cause a major slowdown in the display of the frames.<br>
+
 Features:<br>
 ---------<br>
 - Supports any MCU with at least 24K of RAM (Cortex-M0+ is the simplest I've tested).<br>
