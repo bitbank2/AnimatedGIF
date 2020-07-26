@@ -27,13 +27,18 @@ Features:<br>
 - Does not use dynamic memory (malloc/free/new/delete), so it's easy to build it for a minimal bare metal system.<br>
 <br>
 
-Getting GIF files to play:<br>
---------------------------<br>
+Acquiring GIF files to play:<br>
+----------------------------<br>
 You'll notice that the images provided in the test_images folder have been turned into C code. Each byte is now in the form 0xAB so that it can be compiled into your program and stored in FLASH memory alongside your other code. You can use a command line tool called xxd to convert a binary file into this type of text. Make sure to add a **const** modifier in front of the GIF data array to ensure that it gets written to FLASH and not RAM by your build environment.<br>
 
 The Callback functions:<br>
 -----------------------<br>
 One of the reasons that this is apparently the first universal GIF library for Arduino is because the lack of available RAM and myriad display options would make it difficult to support all MCUs and displays properly. I decided that to solve this issue, I would isolate the GIF decoding from the display and file I/O with callback functions. This allows the core code to run on any system, but you need to help it a little. At a minimum, your code must provide a function to draw (or store) each scan line of image. If you're playing a GIF file from memory, this is the only function you need to provide. In the examples folder there are multiple sketches to show how this is done on various display libraries. For reading from SD cards, 4 other functions must be provided: open, close, read, seek. There is an example for implementing these in the examples folder as well.<br>
+
+The API:<br>
+--------<br>
+Please consult the Wiki for detailed info about each method exposed by the AnimatedGIF class.<br>
+<br>
 
 If you find this code useful, please consider sending a donation or becoming a Github sponsor.
 
