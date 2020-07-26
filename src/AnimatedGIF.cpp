@@ -103,7 +103,7 @@ int AnimatedGIF::open(char *szFilename, GIF_OPEN_CALLBACK *pfnOpen, GIF_CLOSE_CA
 void AnimatedGIF::close()
 {
     if (_gif.pfnClose)
-        (*_gif.pfnClose)(&_gif.GIFFile);
+        (*_gif.pfnClose)(_gif.GIFFile.fHandle);
 } /* close() */
 
 void AnimatedGIF::reset()
@@ -203,6 +203,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
            return 1; // we've got the info we needed, leave
         iColorTableBits = (p[10] & 7) + 1; // Log2(size) of the color table
         pPage->ucBackground = p[11]; // background color
+        pPage->ucGIFBits = 0;
         iOffset = 13;
         if (p[10] & 0x80) // global color table?
         { // convert to byte-reversed RGB565 for immediate use
