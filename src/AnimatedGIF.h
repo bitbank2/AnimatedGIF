@@ -54,7 +54,7 @@ typedef int32_t (GIF_READ_CALLBACK)(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen)
 typedef int32_t (GIF_SEEK_CALLBACK)(GIFFILE *pFile, int32_t iPosition);
 typedef void (GIF_DRAW_CALLBACK)(GIFDRAW *pDraw);
 typedef void * (GIF_OPEN_CALLBACK)(char *szFilename, int32_t *pFileSize);
-typedef void (GIF_CLOSE_CALLBACK)(GIFFILE *pFile);
+typedef void (GIF_CLOSE_CALLBACK)(void *pHandle);
 
 //
 // our private structure to hold a GIF image decode state
