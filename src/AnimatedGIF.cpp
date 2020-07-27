@@ -163,6 +163,7 @@ long lTime = millis();
 //
 static int GIFInit(GIFIMAGE *pGIF)
 {
+    pGIF->GIFFile.iPos = 0; // start at beginning of file
     GIFParseInfo(pGIF, 1); // gather info for the first frame
     (*pGIF->pfnSeek)(&pGIF->GIFFile, 0); // seek back to start of the file
   return 1;
@@ -186,8 +187,12 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
     pPage->bUseLocalPalette = 0; // assume no local palette
     pPage->bEndOfFrame = 0; // we're just getting started
     iReadSize = (bInfoOnly) ? 12 : MAX_CHUNK_SIZE;
+    // If you try to read past the EOF, the SD lib will return garbage data
+    if (iStartPos + iReadSize > pPage->GIFFile.iSize)
+       iReadSize = (pPage->GIFFile.iSize - iStartPos - 1);
     p = pPage->ucFileBuf;
     iBytesRead =  (*pPage->pfnRead)(&pPage->GIFFile, pPage->ucFileBuf, iReadSize); // 255 is plenty for now
+
     if (iBytesRead != iReadSize) // we're at the end of the file
     {
        return 0;
@@ -421,6 +426,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
     int iPixCount;
     unsigned short *giftabs;
     unsigned char *buf, *s, *pEnd, *gifpels;
+
     /* Copy this string of sequential pixels to output buffer */
     //   iPixCount = 0;
     s = pPage->ucFileBuf + FILE_BUF_SIZE; /* Pixels will come out in reversed order */
@@ -508,7 +514,6 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     // if output can be used for string table, do it faster
     //       if (bGIF && (OutPage->cBitsperpixel == 8 && ((OutPage->iWidth & 3) == 0)))
     //          return PILFastLZW(InPage, OutPage, bGIF, iOptions);
-        
     p = pImage->ucLZW; // un-chunked LZW data
     sMask = -1 << (pImage->ucCodeStart + 1);
     sMask = 0xffff - sMask;
@@ -521,6 +526,7 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     bitnum = 0;
     pImage->iLZWOff = 0; // Offset into compressed data
     GIFGetMoreData(pImage); // Read some data to start
+
     // Initialize code table
     // this part only needs to be initialized once
     for (i = 0; i < cc; i++)
