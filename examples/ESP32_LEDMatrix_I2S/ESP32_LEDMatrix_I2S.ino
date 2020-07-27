@@ -16,7 +16,7 @@
 // instance data occupies about 22.5K of RAM.
 // 
 
-#include "homer_tiny.h"
+#include "../test_images/homer_tiny.h"
 
 // ----------------------------
 // Additional Libraries - each one of these will need to be installed.
