@@ -230,10 +230,6 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
     }
     while (p[iOffset] != ',') /* Wait for image separator */
     {
-//        if ((iBytesRead - iOffset) < 512) // read more data
-//        {
-//           iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], 512);
-//        }
         if (p[iOffset] == '!') /* Extension block */
         {
             iOffset++;
@@ -257,6 +253,14 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                     while (c) /* Skip all data sub-blocks */
                     {
                         c = p[iOffset++]; /* Block length */
+                        if ((iBytesRead - iOffset) < (c+32)) // need to read more data first
+                        {
+                            memcpy(pPage->ucFileBuf, &pPage->ucFileBuf[iOffset], (iBytesRead-iOffset)); // move existing data down
+                            iBytesRead -= iOffset;
+                            iStartPos += iOffset;
+                            iOffset = 0;
+                            iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], c+32);
+                        }
                         if (c == 11) // fixed block length
                         { // Netscape app block contains the repeat count
                             if (memcmp(&p[iOffset], "NETSCAPE2.0", 11) == 0)
