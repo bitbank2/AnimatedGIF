@@ -31,6 +31,15 @@ void GIFDraw(GIFDRAW *pDraw)
     y = pDraw->iY + pDraw->y; // current line
     
     s = pDraw->pPixels;
+    if (pDraw->ucDisposalMethod == 2) // restore to background color
+    {
+      for (x=0; x<iWidth; x++)
+      {
+        if (s[x] == pDraw->ucTransparent)
+           s[x] = pDraw->ucBackground;
+      }
+      pDraw->ucHasTransparency = 0;
+    }
     // Apply the new pixels to the main image
     if (pDraw->ucHasTransparency) // if transparency used
     {
