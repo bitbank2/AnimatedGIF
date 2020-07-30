@@ -15,6 +15,8 @@
 #define SCK_PIN 21
 #define MISO_PIN 22
 
+#define DISPLAY_WIDTH 240
+#define DISPLAY_HEIGHT 240
 
 AnimatedGIF gif;
 File f;
@@ -25,8 +27,11 @@ void GIFDraw(GIFDRAW *pDraw)
 {
     uint8_t *s;
     uint16_t *d, *usPalette, usTemp[320];
-    int x, y;
+    int x, y, iWidth;
 
+    iWidth = pDraw->iWidth;
+    if (iWidth > DISPLAY_WIDTH)
+       iWidth = DISPLAY_WIDTH;
     usPalette = pDraw->pPalette;
     y = pDraw->iY + pDraw->y; // current line
     
@@ -45,10 +50,10 @@ void GIFDraw(GIFDRAW *pDraw)
     {
       uint8_t *pEnd, c, ucTransparent = pDraw->ucTransparent;
       int x, iCount;
-      pEnd = s + pDraw->iWidth;
+      pEnd = s + iWidth;
       x = 0;
       iCount = 0; // count non-transparent pixels
-      while(x < pDraw->iWidth)
+      while(x < iWidth)
       {
         c = ucTransparent-1;
         d = usTemp;
@@ -93,10 +98,10 @@ void GIFDraw(GIFDRAW *pDraw)
     {
       s = pDraw->pPixels;
       // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
-      for (x=0; x<pDraw->iWidth; x++)
+      for (x=0; x<iWidth; x++)
         usTemp[x] = usPalette[*s++];
-      spilcdSetPosition(pDraw->iX+x_offset, y+y_offset, pDraw->iWidth, 1, 1);
-      spilcdWriteDataBlock((uint8_t *)usTemp, pDraw->iWidth*2, 1);
+      spilcdSetPosition(pDraw->iX+x_offset, y+y_offset, iWidth, 1, 1);
+      spilcdWriteDataBlock((uint8_t *)usTemp, iWidth*2, 1);
     }
 } /* GIFDraw() */
 
@@ -166,9 +171,9 @@ void ShowGIF(char *name)
   
   if (gif.open(name, GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDraw))
   {
-    x_offset = (240 - gif.getCanvasWidth())/2;
+    x_offset = (DISPLAY_WIDTH - gif.getCanvasWidth())/2;
     if (x_offset < 0) x_offset = 0;
-    y_offset = (240 - gif.getCanvasHeight())/2;
+    y_offset = (DISPLAY_HEIGHT - gif.getCanvasHeight())/2;
     if (y_offset < 0) y_offset = 0;
     Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
     Serial.flush();

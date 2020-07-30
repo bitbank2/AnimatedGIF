@@ -32,6 +32,8 @@
 #define TFT_CLK        13
 #define TFT_MISO       12
 
+#define DISPLAY_WIDTH 240
+
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, TFT_RST, TFT_MISO);
 AnimatedGIF gif;
 
@@ -40,8 +42,11 @@ void GIFDraw(GIFDRAW *pDraw)
 {
     uint8_t *s;
     uint16_t *d, *usPalette, usTemp[320];
-    int x, y;
+    int x, y, iWidth;
 
+    iWidth = pDraw->iWidth;
+    if (iWidth > DISPLAY_WIDTH)
+       iWidth = DISPLAY_WIDTH;
     usPalette = pDraw->pPalette;
     y = pDraw->iY + pDraw->y; // current line
     
@@ -60,10 +65,10 @@ void GIFDraw(GIFDRAW *pDraw)
     {
       uint8_t *pEnd, c, ucTransparent = pDraw->ucTransparent;
       int x, iCount;
-      pEnd = s + pDraw->iWidth;
+      pEnd = s + iWidth;
       x = 0;
       iCount = 0; // count non-transparent pixels
-      while(x < pDraw->iWidth)
+      while(x < iWidth)
       {
         c = ucTransparent-1;
         d = usTemp;
@@ -110,11 +115,11 @@ void GIFDraw(GIFDRAW *pDraw)
     {
       s = pDraw->pPixels;
       // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
-      for (x=0; x<pDraw->iWidth; x++)
+      for (x=0; x<iWidth; x++)
         usTemp[x] = usPalette[*s++];
-      tft.setAddrWindow(pDraw->iX, y, pDraw->iWidth, 1);
+      tft.setAddrWindow(pDraw->iX, y, iWidth, 1);
       tft.startWrite();
-      tft.writePixels(usTemp, pDraw->iWidth, false, false);
+      tft.writePixels(usTemp, iWidth, false, false);
       tft.endWrite();
     }
 } /* GIFDraw() */
