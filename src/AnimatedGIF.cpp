@@ -477,6 +477,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             gd.iX = pPage->iX;
             gd.iY = pPage->iY;
             gd.iWidth = pPage->iWidth;
+            gd.iHeight = pPage->iHeight;
             gd.pPixels = pPage->ucLineBuf;
             gd.pPalette = (pPage->bUseLocalPalette) ? pPage->pLocalPalette : pPage->pPalette;
             gd.y = pPage->iHeight - pPage->iYCount;

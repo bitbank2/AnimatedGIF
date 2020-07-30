@@ -14,6 +14,8 @@
 //#define SCK_PIN        5
 //#define MISO_PIN       6
 
+// ST7735 width
+#define DISPLAY_WIDTH 160
 AnimatedGIF gif;
 uint8_t ucTXBuf[1024];
 
@@ -22,11 +24,13 @@ void GIFDraw(GIFDRAW *pDraw)
 {
     uint8_t *s;
     uint16_t *d, *usPalette, usTemp[320];
-    int x, y;
+    int x, y, iWidth;
 
     usPalette = pDraw->pPalette;
     y = pDraw->iY + pDraw->y; // current line
-    
+    iWidth = pDraw->iWidth;
+    if (iWidth > DISPLAY_WIDTH)
+       iWidth = DISPLAY_WIDTH;
     s = pDraw->pPixels;
     if (pDraw->ucDisposalMethod == 2) // restore to background color
     {
@@ -42,10 +46,10 @@ void GIFDraw(GIFDRAW *pDraw)
     {
       uint8_t *pEnd, c, ucTransparent = pDraw->ucTransparent;
       int x, iCount;
-      pEnd = s + pDraw->iWidth;
+      pEnd = s + iWidth;
       x = 0;
       iCount = 0; // count non-transparent pixels
-      while(x < pDraw->iWidth)
+      while(x < iWidth)
       {
         c = ucTransparent-1;
         d = usTemp;
@@ -90,10 +94,10 @@ void GIFDraw(GIFDRAW *pDraw)
     {
       s = pDraw->pPixels;
       // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
-      for (x=0; x<pDraw->iWidth; x++)
+      for (x=0; x<iWidth; x++)
         usTemp[x] = usPalette[*s++];
-      spilcdSetPosition(pDraw->iX, y, pDraw->iWidth, 1, 1);
-      spilcdWriteDataBlock((uint8_t *)usTemp, pDraw->iWidth*2, 1);
+      spilcdSetPosition(pDraw->iX, y, iWidth, 1, 1);
+      spilcdWriteDataBlock((uint8_t *)usTemp, iWidth*2, 1);
     }
 } /* GIFDraw() */
 

@@ -40,7 +40,7 @@ typedef struct gif_draw_tag
 {
     int iX, iY; // Corner offset of this frame on the canvas
     int y; // current line being drawn (0 = top line of image)
-    int iWidth; // width of the current line
+    int iWidth, iHeight; // size of this frame
     uint8_t *pPixels; // 8-bit source pixels for this line
     uint16_t *pPalette; // little or big-endian RGB565 palette entries
     uint8_t ucTransparent; // transparent color
