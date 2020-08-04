@@ -20,7 +20,6 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
-#include <Arduino.h>
 #include "AnimatedGIF.h"
 
 static const unsigned char cGIFBits[9] = {1,4,4,4,8,8,8,8,8}; // convert odd bpp values to ones we can handle
@@ -33,6 +32,32 @@ static int GIFGetMoreData(GIFIMAGE *pPage);
 static void GIFMakePels(GIFIMAGE *pPage, unsigned int code);
 static int DecodeLZW(GIFIMAGE *pImage, int iOptions);
 
+#if defined( __MACH__ ) || defined( __LINUX__ )
+#include <time.h>
+
+long millis()
+{
+long lTime;
+struct timespec res;
+
+    clock_gettime(CLOCK_MONOTONIC, &res);
+    lTime = 1000*res.tv_sec + res.tv_nsec/1000000;
+
+    return lTime;
+} /* millis() */
+
+void delay(int iDelay)
+{
+long d, lTime = millis();
+
+    d = 0;
+    while (d < iDelay)
+    {
+       d = millis() - lTime;
+    }
+} /* delay() */
+
+#endif // Linux
 //
 // Helper functions for memory based images
 //
@@ -72,6 +97,20 @@ int AnimatedGIF::open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
     _gif.GIFFile.pData = pData;
     return GIFInit(&_gif);
 } /* open() */
+
+//
+// Returns the first comment block found (if any)
+int AnimatedGIF::getComment(char *pDest)
+{
+int32_t iOldPos;
+
+    iOldPos = _gif.GIFFile.iPos; // keep old position
+    (*_gif.pfnSeek)(&_gif.GIFFile, _gif.iCommentPos);
+    (*_gif.pfnRead)(&_gif.GIFFile, (uint8_t *)pDest, _gif.sCommentLen);
+    (*_gif.pfnSeek)(&_gif.GIFFile, iOldPos);
+    pDest[_gif.sCommentLen] = 0; // zero terminate the string
+    return (int)_gif.sCommentLen;
+} /* getComment() */
 
 int AnimatedGIF::getCanvasWidth()
 {
@@ -292,18 +331,13 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                     break;
                 case 0xfe: /* Comment */
                     c = 1;
-                    j = 0;
                     while (c) /* Skip all data sub-blocks */
                     {
                         c = p[iOffset++]; /* Block length */
-                        if (j == 0) // use only first block
+                        if (pPage->iCommentPos == 0) // Save first block info
                         {
-                            j = c;
-                            if (j > 127)   // max comment length = 127
-                                j = 127;
-                            //                           memcpy(pPage->szComment, &p[iOffset], j);
-                            //                           pPage->szComment[j] = '\0';
-                            j = 1;
+                            pPage->iCommentPos = iStartPos + iOffset;
+                            pPage->sCommentLen = c;
                         }
                         iOffset += (int)c; /* Skip this sub-block */
                     }

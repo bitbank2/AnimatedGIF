@@ -1,6 +1,15 @@
 #ifndef __ANIMATEDGIF__
 #define __ANIMATEDGIF__
+#if defined( __MACH__ ) || defined( __LINUX__ )
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#define memcpy_P memcpy
+#define PROGMEM
+#else
 #include <Arduino.h>
+#endif
 //
 // GIF Animator
 // Written by Larry Bank
@@ -68,6 +77,8 @@ typedef struct gif_image_tag
     int iXCount, iYCount; // decoding position in image (countdown values)
     int iLZWOff; // current LZW data offset
     int iLZWSize; // current quantity of data in the LZW buffer
+    int iCommentPos; // file offset of start of comment data
+    short sCommentLen; // length of comment
     GIF_READ_CALLBACK *pfnRead;
     GIF_SEEK_CALLBACK *pfnSeek;
     GIF_DRAW_CALLBACK *pfnDraw;
@@ -100,6 +111,7 @@ class AnimatedGIF
     int playFrame(bool bSync, int *delayMilliseconds);
     int getCanvasWidth();
     int getCanvasHeight();
+    int getComment(char *destBuffer);
 
   private:
     GIFIMAGE _gif;
