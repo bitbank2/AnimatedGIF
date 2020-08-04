@@ -8,7 +8,7 @@ info@cyriak.co.uk
 
 Usage:
 
-- Download archive from https://github.com/bitbank2/AnimatedGIF/archive/Gif_Animations_By_Cyriak_Harris.zip
+- Download archive from https://github.com/bitbank2/AnimatedGIF/releases/download/1.0.1/Gif_Animations_By_Cyriak_Harris.zip
 - Unzip it to your SD Card
 - Insert the SD Card in your ESP32
 - Flash the sketch
