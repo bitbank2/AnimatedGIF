@@ -203,7 +203,8 @@ long lTime = millis();
 static int GIFInit(GIFIMAGE *pGIF)
 {
     pGIF->GIFFile.iPos = 0; // start at beginning of file
-    GIFParseInfo(pGIF, 1); // gather info for the first frame
+    if (!GIFParseInfo(pGIF, 1)) // gather info for the first frame
+       return 0; // something went wrong; not a GIF file?
     (*pGIF->pfnSeek)(&pGIF->GIFFile, 0); // seek back to start of the file
   return 1;
 } /* GIFInit() */
