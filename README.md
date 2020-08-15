@@ -17,6 +17,14 @@ Designed for Speed<br>
 ------------------<br>
 My work is always focused on code optimization, so this project is no different. I've profiled this code and optimized it for 32-bit CPUs. I discovered while testing it that seeking on micro SD cards (on Arduino) is very very slow. I had to use a little extra RAM to buffer incoming data to avoid seeking. The code does need to seek, but it's done very rarely. I also wrote code to buffer and de-chunk some of the incoming LZW data to avoid checking for chunk boundaries in the inner decode loop. There are a number of clever optimizations that should allow this to run faster than any existing GIF solutions on Arduino boards. The speed gained from my decoder will be lost if it takes too long to display the pixels. For this reason, the GIFDRAW callback passes an RGB565 palette in the byte order of your choosing and the example sketches uses functions to write entire lines of pixels to the SPI TFT displays in a single shot. If you implement your own GIFDRAW callback and have to pass 1 pixel at a time to whatever display device you're using, this will cause a major slowdown in the display of the frames.<br>
 
+<br>
+<p align="center">
+  <img width="600" height="200" src="https://github.com/bitbank2/AnimatedGIF/blob/master/perf.png?raw=true">
+</p>
+
+**A note about performance**<br>
+The chart above shows the total time to decode an 8-frame sequence included in the test_images folder. The decoding speed of your particular image depends on the complexity (how much compressed data) and if/how transparent pixels are used. Small runs of transparent pixels will interfere with the performance of displaying the image on an SPI LCD. This particular image doesn't use transparency, so the time is purely for decoding the data.
+
 Features:<br>
 ---------<br>
 - Supports any MCU with at least 24K of RAM (Cortex-M0+ is the simplest I've tested).<br>
