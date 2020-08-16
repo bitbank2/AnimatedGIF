@@ -174,11 +174,11 @@ long lTime = millis();
     {
         rc = DecodeLZW(&_gif, 0);
         if (rc != 0) // problem
-            return -1;
+            return 0;
     }
     else
     {
-        return -1; // error parsing the frame info
+        return 0; // error parsing the frame info, we may be at the end of the file
     }
     // Return 1 for more frames or 0 if this was the last frame
     if (bSync)
