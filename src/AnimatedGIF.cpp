@@ -280,7 +280,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                     {
                         pPage->ucGIFBits = p[iOffset+1]; // packed fields
                         pPage->iFrameDelay = (INTELSHORT(&p[iOffset+2]))*10; // delay in ms
-                        if (pPage->iFrameDelay < 30) // 0-2 is going to make it run at 60fps; use 100 (10fps) as a reasonable substitute
+                        if (pPage->iFrameDelay <= 1) // 0-1 is going to make it run at 60fps; use 100 (10fps) as a reasonable substitute
                            pPage->iFrameDelay = 100;
                         if (pPage->ucGIFBits & 1) // transparent color is used
                             pPage->ucTransparent = p[iOffset+4]; // transparent color index
