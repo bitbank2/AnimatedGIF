@@ -116,8 +116,8 @@ void GIFDraw(GIFDRAW *pDraw)
         } // while looking for opaque pixels
         if (iCount) // any opaque pixels?
         {
-          tft.setAddrWindow(pDraw->iX+x, y, iCount, 1);
           tft.startWrite();
+          tft.setAddrWindow(pDraw->iX+x, y, iCount, 1);
           tft.writePixels(usTemp, iCount, false, false);
           tft.endWrite();
           x += iCount;
