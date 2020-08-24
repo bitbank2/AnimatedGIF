@@ -1,17 +1,16 @@
 CFLAGS=-D__LINUX__ -c -Wall -O2 
 LIBS = 
-CXX = g++
 
 all: demo 
 
-demo: main.o AnimatedGIF.o
-	$(CXX) main.o AnimatedGIF.o $(LIBS) -o demo 
+demo: main.o gif.o
+	$(CC) main.o gif.o $(LIBS) -o demo 
 
-main.o: main.cpp
-	$(CXX) $(CFLAGS) main.cpp
+main.o: main.c
+	$(CC) $(CFLAGS) main.c
 
-AnimatedGIF.o: ../src/AnimatedGIF.cpp
-	$(CXX) $(CFLAGS) ../src/AnimatedGIF.cpp
+gif.o: ../src/gif.c
+	$(CC) $(CFLAGS) ../src/gif.c
 
 clean:
 	rm -rf *.o demo

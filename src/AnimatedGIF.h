@@ -12,7 +12,7 @@
 
 #ifndef __ANIMATEDGIF__
 #define __ANIMATEDGIF__
-#if defined( __MACH__ ) || defined( __LINUX__ )
+#if defined( __MACH__ ) || defined( __LINUX__ ) || defined( __MCUXPRESSO )
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -74,7 +74,7 @@ typedef struct gif_draw_tag
 typedef int32_t (GIF_READ_CALLBACK)(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 typedef int32_t (GIF_SEEK_CALLBACK)(GIFFILE *pFile, int32_t iPosition);
 typedef void (GIF_DRAW_CALLBACK)(GIFDRAW *pDraw);
-typedef void * (GIF_OPEN_CALLBACK)(char *szFilename, int32_t *pFileSize);
+typedef void * (GIF_OPEN_CALLBACK)(const char *szFilename, int32_t *pFileSize);
 typedef void (GIF_CLOSE_CALLBACK)(void *pHandle);
 
 //
@@ -109,6 +109,7 @@ typedef struct gif_image_tag
     unsigned char ucGIFBits, ucBackground, ucTransparent, ucCodeStart, ucMap, bUseLocalPalette, ucLittleEndian;
 } GIFIMAGE;
 
+#ifdef __cplusplus
 //
 // The GIF class wraps portable C code which does the actual work
 //
@@ -116,7 +117,7 @@ class AnimatedGIF
 {
   public:
     int open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw);
-    int open(char *szFilename, GIF_OPEN_CALLBACK *pfnOpen, GIF_CLOSE_CALLBACK *pfnClose, GIF_READ_CALLBACK *pfnRead, GIF_SEEK_CALLBACK *pfnSeek, GIF_DRAW_CALLBACK *pfnDraw);
+    int open(const char *szFilename, GIF_OPEN_CALLBACK *pfnOpen, GIF_CLOSE_CALLBACK *pfnClose, GIF_READ_CALLBACK *pfnRead, GIF_SEEK_CALLBACK *pfnSeek, GIF_DRAW_CALLBACK *pfnDraw);
     void close();
     void reset();
     void begin(int iEndian);
@@ -128,6 +129,18 @@ class AnimatedGIF
   private:
     GIFIMAGE _gif;
 };
+#else
+// C interface
+    int GIF_openRAM(GIFIMAGE *pGIF, uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw);
+    int GIF_openFile(GIFIMAGE *pGIF, const char *szFilename, GIF_DRAW_CALLBACK *pfnDraw);
+    void GIF_close(GIFIMAGE *pGIF);
+    void GIF_begin(GIFIMAGE *pGIF, int iEndian);
+    void GIF_reset(GIFIMAGE *pGIF);
+    int GIF_playFrame(GIFIMAGE *pGIF, int *delayMilliseconds);
+    int GIF_getCanvasWidth(GIFIMAGE *pGIF);
+    int GIF_getCanvasHeight(GIFIMAGE *pGIF);
+    int GIF_getComment(GIFIMAGE *pGIF, char *destBuffer);
+#endif // __cplusplus
 
 // Due to unaligned memory causing an exception, we have to do these macros the slow way
 #define INTELSHORT(p) ((*p) + (*(p+1)<<8))
