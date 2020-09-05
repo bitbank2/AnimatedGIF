@@ -26,6 +26,7 @@
 // GIF Animator
 // Written by Larry Bank
 // Copyright (c) 2020 BitBank Software, Inc.
+// bitbank@pobox.com
 // 
 // Designed to decode images up to 480x320
 // using less than 22K of RAM
@@ -49,6 +50,14 @@
 #define BIG_ENDIAN_PIXELS 0
 #define LITTLE_ENDIAN_PIXELS 1
 
+enum {
+   GIF_SUCCESS = 0,
+   GIF_DECODE_ERROR,
+   GIF_TOO_WIDE,
+   GIF_INVALID_PARAMETER,
+   GIF_UNSUPPORTED_FEATURE
+};
+
 typedef struct gif_file_tag
 {
   int32_t iPos; // current file position
@@ -56,6 +65,14 @@ typedef struct gif_file_tag
   uint8_t *pData; // memory file pointer
   void * fHandle; // class pointer to File/SdFat or whatever you want
 } GIFFILE;
+
+typedef struct gif_info_tag
+{
+  int32_t iFrameCount; // total frames in file
+  int32_t iDuration; // duration of animation in milliseconds
+  int32_t iMaxDelay; // maximum frame delay
+  int32_t iMinDelay; // minimum frame delay
+} GIFINFO;
 
 typedef struct gif_draw_tag
 {
@@ -85,6 +102,7 @@ typedef struct gif_image_tag
     int iWidth, iHeight, iCanvasWidth, iCanvasHeight;
     int iX, iY; // GIF corner offset
     int iBpp;
+    int iError; // last error
     int iFrameDelay; // delay in milliseconds for this frame
     int iXCount, iYCount; // decoding position in image (countdown values)
     int iLZWOff; // current LZW data offset
@@ -124,6 +142,8 @@ class AnimatedGIF
     int playFrame(bool bSync, int *delayMilliseconds);
     int getCanvasWidth();
     int getCanvasHeight();
+    int getInfo(GIFINFO *pInfo);
+    int getLastError();
     int getComment(char *destBuffer);
 
   private:
@@ -140,6 +160,8 @@ class AnimatedGIF
     int GIF_getCanvasWidth(GIFIMAGE *pGIF);
     int GIF_getCanvasHeight(GIFIMAGE *pGIF);
     int GIF_getComment(GIFIMAGE *pGIF, char *destBuffer);
+    int GIF_getInfo(GIFIMAGE *pGIF, GIFINFO *pInfo);
+    int GIF_getLastError(GIFIMAGE *pGIF);
 #endif // __cplusplus
 
 // Due to unaligned memory causing an exception, we have to do these macros the slow way

@@ -62,6 +62,16 @@ int AnimatedGIF::getCanvasHeight()
     return _gif.iCanvasHeight;
 } /* getCanvasHeight() */
 
+int AnimatedGIF::getInfo(GIFINFO *pInfo)
+{
+   return GIFGetInfo(&_gif, pInfo);
+} /* getInfo() */
+
+int AnimatedGIF::getLastError()
+{
+    return _gif.iError;
+} /* getLastError() */
+
 //
 // File (SD/MMC) based initialization
 //
@@ -93,6 +103,8 @@ void AnimatedGIF::reset()
 void AnimatedGIF::begin(int iEndian)
 {
     memset(&_gif, 0, sizeof(_gif));
+    if (iEndian < LITTLE_ENDIAN_PIXELS || iEndian > BIG_ENDIAN_PIXELS)
+        _gif.iError = GIF_INVALID_PARAMETER;
     _gif.ucLittleEndian = (iEndian == LITTLE_ENDIAN_PIXELS);
 }
 //
@@ -104,8 +116,10 @@ void AnimatedGIF::begin(int iEndian)
 int AnimatedGIF::playFrame(bool bSync, int *delayMilliseconds)
 {
 int rc;
+#if !defined( __MACH__ ) && !defined( __LINUX__ )
 long lTime = millis();
-    
+#endif
+
     if (_gif.GIFFile.iPos >= _gif.GIFFile.iSize-1) // no more data exists
     {
         (*_gif.pfnSeek)(&_gif.GIFFile, 0); // seek to start
@@ -123,9 +137,11 @@ long lTime = millis();
     // Return 1 for more frames or 0 if this was the last frame
     if (bSync)
     {
+#if !defined( __MACH__ ) && !defined( __LINUX__ ) 
         lTime = millis() - lTime;
         if (lTime < _gif.iFrameDelay) // need to pause a bit
            delay(_gif.iFrameDelay - lTime);
+#endif // __LINUX__
     }
     if (delayMilliseconds) // if not NULL, return the frame delay time
         *delayMilliseconds = _gif.iFrameDelay;

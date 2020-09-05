@@ -31,7 +31,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code);
 static int DecodeLZW(GIFIMAGE *pImage, int iOptions);
 static int32_t readMem(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 static int32_t seekMem(GIFFILE *pFile, int32_t iPosition);
-
+int GIFGetInfo(GIFIMAGE *pPage, GIFINFO *pInfo);
 #if defined( __LINUX__ ) || defined( __MCUXPRESSO )
 static int32_t readFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 static int32_t seekFile(GIFFILE *pFile, int32_t iPosition);
@@ -129,6 +129,12 @@ int32_t iOldPos;
     return (int)pGIF->sCommentLen;
 
 } /* GIF_getComment() */
+
+int GIF_getLastError(GIFIMAGE *pGIF)
+{
+    return pGIF->iError;
+} /* GIF_getLastError() */
+
 #endif // !__cplusplus
 //
 // Helper functions for memory based images
@@ -200,6 +206,10 @@ static int GIFInit(GIFIMAGE *pGIF)
     if (!GIFParseInfo(pGIF, 1)) // gather info for the first frame
        return 0; // something went wrong; not a GIF file?
     (*pGIF->pfnSeek)(&pGIF->GIFFile, 0); // seek back to start of the file
+    if (pGIF->iCanvasWidth > MAX_WIDTH) { // need to allocate more space
+        pGIF->iError = GIF_TOO_WIDE;
+        return 0;
+    }
   return 1;
 } /* GIFInit() */
 
@@ -339,12 +349,14 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                     break;
                 default:
                     /* Bad header info */
+                    pPage->iError = GIF_DECODE_ERROR;
                     return 0;
             } /* switch */
         }
         else // invalid byte, stop decoding
         {
             /* Bad header info */
+            pPage->iError = GIF_DECODE_ERROR;
             return 0;
         }
     } /* while */
@@ -365,6 +377,11 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
      pixel+1 = # bits per pixel for this image
      */
     pPage->ucMap = p[iOffset++];
+    if (pPage->ucMap & 0x40) // interlaced is not supported due to RAM requirements
+    {
+        pPage->iError = GIF_UNSUPPORTED_FEATURE;
+        return 0;
+    }
     if (pPage->ucMap & 0x80) // local color table?
     {// convert to byte-reversed RGB565 for immediate use
         j = (1<<((pPage->ucMap & 7)+1));
@@ -424,15 +441,162 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
     return 1; // we are now at the start of the chunk data
 } /* GIFParseInfo() */
 //
+// Gather info about an animated GIF file
+//
+int GIFGetInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
+{
+    int iOff, iNumFrames;
+    int iDelay, iMaxDelay, iMinDelay, iTotalDelay;
+    int iReadAmount;
+    int iDataAvailable = 0;
+    int iDataRemaining = 0;
+    uint32_t lFileOff = 0;
+    int bDone = 0;
+    int bExt;
+    uint8_t c, *cBuf;
+
+    iMaxDelay = iTotalDelay = 0;
+    iMinDelay = 10000;
+    iNumFrames = 1;
+    iDataRemaining = pPage->GIFFile.iSize;
+    cBuf = (uint8_t *) pPage->ucFileBuf;
+    (*pPage->pfnSeek)(&pPage->GIFFile, 0);
+    iDataAvailable = (*pPage->pfnRead)(&pPage->GIFFile, cBuf, FILE_BUF_SIZE);
+    iOff = 10;
+    c = cBuf[iOff]; // get info bits
+    iOff += 3;   /* Skip flags, background color & aspect ratio */
+    if (c & 0x80) /* Deal with global color table */
+    {
+        c &= 7;  /* Get the number of colors defined */
+        iOff += (2<<c)*3; /* skip color table */
+    }
+    while (!bDone) // && iNumFrames < MAX_FRAMES)
+    {
+        bExt = 1; /* skip extension blocks */
+        while (bExt && iOff < iDataAvailable)
+        {
+            switch(cBuf[iOff])
+            {
+                case 0x3b: /* End of file */
+                    /* we were fooled into thinking there were more pages */
+                    iNumFrames--;
+                    goto gifpagesz;
+    // F9 = Graphic Control Extension (fixed length of 4 bytes)
+    // FE = Comment Extension
+    // FF = Application Extension
+    // 01 = Plain Text Extension
+                case 0x21: /* Extension block */
+                    if (cBuf[iOff+1] == 0xf9 && cBuf[iOff+2] == 4) // Graphic Control Extension
+                    {
+                       //cBuf[iOff+3]; // page disposition flags
+                        iDelay = cBuf[iOff+4]; // delay low byte
+                        iDelay |= (cBuf[iOff+5] << 8); // delay high byte
+                        if (iDelay < 2) // too fast, provide a default
+                            iDelay = 2;
+                        iDelay *= 10; // turn JIFFIES into milliseconds
+                        iTotalDelay += iDelay;
+                        if (iDelay > iMaxDelay) iMaxDelay = iDelay;
+                        else if (iDelay < iMinDelay) iMinDelay = iDelay;
+                       // (cBuf[iOff+6]; // transparent color index
+                    }
+                    iOff += 2; /* skip to length */
+                    iOff += (int)cBuf[iOff]; /* Skip the data block */
+                    iOff++;
+                   // block terminator or optional sub blocks
+                    c = cBuf[iOff++]; /* Skip any sub-blocks */
+                    while (c && iOff < (iDataAvailable - c))
+                    {
+                        iOff += (int)c;
+                        c = cBuf[iOff++];
+                    }
+                    if (c != 0) // problem, we went past the end
+                    {
+                        iNumFrames--; // possible corrupt data; stop
+                        goto gifpagesz;
+                    }
+                    break;
+                case 0x2c: /* Start of image data */
+                    bExt = 0; /* Stop doing extension blocks */
+                    break;
+                default:
+                   /* Corrupt data, stop here */
+                    iNumFrames--;
+                    goto gifpagesz;
+            } // switch
+        } // while
+        if (iOff >= iDataAvailable) // problem
+        {
+             iNumFrames--; // possible corrupt data; stop
+             goto gifpagesz;
+        }
+          /* Start of image data */
+        c = cBuf[iOff+9]; /* Get the flags byte */
+        iOff += 10; /* Skip image position and size */
+        if (c & 0x80) /* Local color table */
+        {
+            c &= 7;
+            iOff += (2<<c)*3;
+        }
+        iOff++; /* Skip LZW code size byte */
+        c = cBuf[iOff++];
+        while (c) /* While there are more data blocks */
+        {
+            if (iOff > (3*FILE_BUF_SIZE/4) && iDataRemaining > 0) /* Near end of buffer, re-align */
+            {
+                lFileOff += iOff; /* adjust total file pointer */
+                iDataRemaining -= iOff;
+                iReadAmount = (iDataRemaining > FILE_BUF_SIZE) ? FILE_BUF_SIZE:iDataRemaining;
+                (*pPage->pfnSeek)(&pPage->GIFFile, lFileOff);
+                iDataAvailable = (*pPage->pfnRead)(&pPage->GIFFile, cBuf, iReadAmount);
+                iOff = 0; /* Start at beginning of buffer */
+            }
+            iOff += (int)c;  /* Skip this data block */
+            if ((int)lFileOff + iOff > pPage->GIFFile.iSize) // past end of file, stop
+            {
+                iNumFrames--; // don't count this page
+                break; // last page is corrupted, don't use it
+            }
+            c = cBuf[iOff++]; /* Get length of next */
+        }
+        /* End of image data, check for more pages... */
+        if (((int)lFileOff + iOff > pPage->GIFFile.iSize) || cBuf[iOff] == 0x3b)
+        {
+            bDone = 1; /* End of file has been reached */
+        }
+        else /* More pages to scan */
+        {
+            iNumFrames++;
+             // read new page data starting at this offset
+            if (pPage->GIFFile.iSize > FILE_BUF_SIZE && iDataRemaining > 0) // since we didn't read the whole file in one shot
+            {
+                lFileOff += iOff; /* adjust total file pointer */
+                iDataRemaining -= iOff;
+                iReadAmount = (iDataRemaining > FILE_BUF_SIZE) ? FILE_BUF_SIZE : iDataRemaining;
+                (*pPage->pfnSeek)(&pPage->GIFFile, lFileOff);
+                iDataAvailable = (*pPage->pfnRead)(&pPage->GIFFile, cBuf, iReadAmount);
+                iOff = 0; /* Start at beginning of buffer */
+            }
+        }
+    } /* while !bDone */
+gifpagesz:
+    pInfo->iFrameCount = iNumFrames;
+    pInfo->iMaxDelay = iMaxDelay;
+    pInfo->iMinDelay = iMinDelay;
+    pInfo->iDuration = iTotalDelay;
+    return 1;
+} /* GIFGetInfo() */
+
+//
 // Unpack more chunk data for decoding
 // returns 1 to signify more data available for this image
 // 0 indicates there is no more data
 //
 static int GIFGetMoreData(GIFIMAGE *pPage)
 {
+    int iDelta = (pPage->iLZWSize - pPage->iLZWOff);
     unsigned char c = 1;
     // move any existing data down
-    if (pPage->bEndOfFrame || (pPage->iLZWSize - pPage->iLZWOff) >= (LZW_BUF_SIZE - MAX_CHUNK_SIZE))
+    if (pPage->bEndOfFrame ||  iDelta >= (LZW_BUF_SIZE - MAX_CHUNK_SIZE) || iDelta <= 0)
         return 1; // frame is finished or buffer is already full; no need to read more data
     if (pPage->iLZWOff != 0)
     {
@@ -459,7 +623,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
     int iPixCount;
     unsigned short *giftabs;
     unsigned char *buf, *s, *pEnd, *gifpels;
-
+    unsigned char ucNeedMore = 0;
     /* Copy this string of sequential pixels to output buffer */
     //   iPixCount = 0;
     s = pPage->ucFileBuf + FILE_BUF_SIZE; /* Pixels will come out in reversed order */
@@ -490,6 +654,8 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
                 }
             pPage->iXCount -= iPixCount;
             //         iPixCount = 0;
+            if (ucNeedMore)
+                GIFGetMoreData(pPage); // check if we need to read more LZW data every 4 lines
             return;
         }
         else  /* Pixels cross into next line */
@@ -518,9 +684,11 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             pPage->iYCount--;
             buf = pPage->ucLineBuf;
             if ((pPage->iYCount & 3) == 0) // since we support only small images...
-                GIFGetMoreData(pPage); // check if we need to read more LZW data every 4 lines
+                ucNeedMore = 1;
         }
     } /* while */
+    if (ucNeedMore)
+        GIFGetMoreData(pPage); // check if we need to read more LZW data every 4 lines
     return;
 } /* GIFMakePels() */
 //
