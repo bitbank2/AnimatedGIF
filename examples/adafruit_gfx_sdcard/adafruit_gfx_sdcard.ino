@@ -12,7 +12,8 @@
 #define TFT_CLK        13
 #define TFT_MISO       12
 
-#define DISPLAY_WIDTH 240
+#define DISPLAY_WIDTH 320
+#define DISPLAY_HEIGHT 240
 
 #ifndef BUILTIN_SDCARD
 #define BUILTIN_SDCARD 0
@@ -22,7 +23,7 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, TFT_R
 AnimatedGIF gif;
 File f;
 
-void * GIFOpenFile(char *fname, int32_t *pSize)
+void * GIFOpenFile(const char *fname, int32_t *pSize)
 {
   f = SD.open(fname);
   if (f)
@@ -62,7 +63,7 @@ int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition)
   f->seek(iPosition);
   pFile->iPos = (int32_t)f->position();
   i = micros() - i;
-  Serial.printf("Seek time = %d us\n", i);
+//  Serial.printf("Seek time = %d us\n", i);
   return pFile->iPos;
 } /* GIFSeekFile() */
 
@@ -74,11 +75,12 @@ void GIFDraw(GIFDRAW *pDraw)
     int x, y, iWidth;
 
     iWidth = pDraw->iWidth;
-    if (iWidth > DISPLAY_WIDTH)
-       iWidth = DISPLAY_WIDTH;
+    if (iWidth + pDraw->iX > DISPLAY_WIDTH)
+       iWidth = DISPLAY_WIDTH - pDraw->iX;
     usPalette = pDraw->pPalette;
     y = pDraw->iY + pDraw->y; // current line
-    
+    if (y >= DISPLAY_HEIGHT || pDraw->iX >= DISPLAY_WIDTH || iWidth < 1)
+       return; 
     s = pDraw->pPixels;
     if (pDraw->ucDisposalMethod == 2) // restore to background color
     {
@@ -89,6 +91,7 @@ void GIFDraw(GIFDRAW *pDraw)
       }
       pDraw->ucHasTransparency = 0;
     }
+
     // Apply the new pixels to the main image
     if (pDraw->ucHasTransparency) // if transparency used
     {
@@ -97,7 +100,7 @@ void GIFDraw(GIFDRAW *pDraw)
       pEnd = s + iWidth;
       x = 0;
       iCount = 0; // count non-transparent pixels
-      while(x < pDraw->iWidth)
+      while(x < iWidth)
       {
         c = ucTransparent-1;
         d = usTemp;
@@ -146,8 +149,8 @@ void GIFDraw(GIFDRAW *pDraw)
       // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
       for (x=0; x<iWidth; x++)
         usTemp[x] = usPalette[*s++];
-      tft.setAddrWindow(pDraw->iX, y, iWidth, 1);
       tft.startWrite();
+      tft.setAddrWindow(pDraw->iX, y, iWidth, 1);
       tft.writePixels(usTemp, iWidth, false, false);
       tft.endWrite();
     }
@@ -173,24 +176,32 @@ void setup() {
 
   // put your setup code here, to run once:
   tft.begin();
+  tft.setRotation(1);
   tft.fillScreen(ILI9341_BLACK);
   gif.begin(LITTLE_ENDIAN_PIXELS);
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-  Serial.println("About to call gif.open");
-  if (gif.open((char *)"/GIF/HOMER.GIF", GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDraw))
+//  Serial.println("About to call gif.open");
+  if (gif.open("/GIF/LLAMA.GIF", GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDraw))
   {
+    GIFINFO gi;
     Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
+    if (gif.getInfo(&gi)) {
+      Serial.printf("frame count: %d\n", gi.iFrameCount);
+      Serial.printf("duration: %d ms\n", gi.iDuration);
+      Serial.printf("max delay: %d ms\n", gi.iMaxDelay);
+      Serial.printf("min delay: %d ms\n", gi.iMinDelay);
+    }
     while (gif.playFrame(true, NULL))
-    {      
+    {
     }
     gif.close();
   }
   else
   {
-    Serial.println("Error opening file");
+    Serial.printf("Error opening file = %d\n", gif.getLastError());
     while (1)
     {};
   }

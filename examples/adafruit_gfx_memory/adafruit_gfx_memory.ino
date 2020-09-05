@@ -32,7 +32,8 @@
 #define TFT_CLK        13
 #define TFT_MISO       12
 
-#define DISPLAY_WIDTH 240
+#define DISPLAY_WIDTH 320
+#define DISPLAY_HEIGHT 240
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_MOSI, TFT_CLK, TFT_RST, TFT_MISO);
 AnimatedGIF gif;
@@ -45,11 +46,12 @@ void GIFDraw(GIFDRAW *pDraw)
     int x, y, iWidth;
 
     iWidth = pDraw->iWidth;
-    if (iWidth > DISPLAY_WIDTH)
-       iWidth = DISPLAY_WIDTH;
+    if (iWidth + pDraw->iX > DISPLAY_WIDTH)
+       iWidth = DISPLAY_WIDTH - pDraw->iX;
     usPalette = pDraw->pPalette;
     y = pDraw->iY + pDraw->y; // current line
-    
+    if (y >= DISPLAY_HEIGHT || pDraw->iX >= DISPLAY_WIDTH || iWidth < 1)
+       return; 
     s = pDraw->pPixels;
     if (pDraw->ucDisposalMethod == 2) // restore to background color
     {
@@ -60,6 +62,7 @@ void GIFDraw(GIFDRAW *pDraw)
       }
       pDraw->ucHasTransparency = 0;
     }
+
     // Apply the new pixels to the main image
     if (pDraw->ucHasTransparency) // if transparency used
     {
@@ -117,8 +120,8 @@ void GIFDraw(GIFDRAW *pDraw)
       // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
       for (x=0; x<iWidth; x++)
         usTemp[x] = usPalette[*s++];
-      tft.setAddrWindow(pDraw->iX, y, iWidth, 1);
       tft.startWrite();
+      tft.setAddrWindow(pDraw->iX, y, iWidth, 1);
       tft.writePixels(usTemp, iWidth, false, false);
       tft.endWrite();
     }
@@ -130,6 +133,7 @@ void setup() {
   
   // put your setup code here, to run once:
   tft.begin();
+  tft.setRotation(1);
   tft.fillScreen(ILI9341_BLACK);
   gif.begin(LITTLE_ENDIAN_PIXELS);
 }
