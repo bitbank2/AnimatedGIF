@@ -38,7 +38,8 @@ static void MyCustomDelay( unsigned long ms ) {
 }
 
 
-static void * GIFOpenFile(char *fname, int32_t *pSize) {
+static void * GIFOpenFile(const char *fname, int32_t *pSize)
+{
   //log_d("GIFOpenFile( %s )\n", fname );
   FSGifFile = M5STACK_SD.open(fname);
   if (FSGifFile) {
@@ -49,14 +50,16 @@ static void * GIFOpenFile(char *fname, int32_t *pSize) {
 }
 
 
-static void GIFCloseFile(void *pHandle) {
+static void GIFCloseFile(void *pHandle)
+{
   File *f = static_cast<File *>(pHandle);
   if (f != NULL)
      f->close();
 }
 
 
-static int32_t GIFReadFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen) {
+static int32_t GIFReadFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen)
+{
   int32_t iBytesRead;
   iBytesRead = iLen;
   File *f = static_cast<File *>(pFile->fHandle);
@@ -71,7 +74,8 @@ static int32_t GIFReadFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen) {
 }
 
 
-static int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition) {
+static int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition)
+{
   int i = micros();
   File *f = static_cast<File *>(pFile->fHandle);
   f->seek(iPosition);
@@ -82,13 +86,15 @@ static int32_t GIFSeekFile(GIFFILE *pFile, int32_t iPosition) {
 }
 
 
-static void TFTDraw(int x, int y, int w, int h, uint16_t* lBuf ) {
+static void TFTDraw(int x, int y, int w, int h, uint16_t* lBuf )
+{
   tft.pushRect( x+xOffset, y+yOffset, w, h, lBuf );
 }
 
 
 // Draw a line of image directly on the LCD
-void GIFDraw(GIFDRAW *pDraw) {
+void GIFDraw(GIFDRAW *pDraw)
+{
   uint8_t *s;
   uint16_t *d, *usPalette, usTemp[320];
   int x, y, iWidth;
@@ -155,7 +161,8 @@ void GIFDraw(GIFDRAW *pDraw) {
 } /* GIFDraw() */
 
 
-int gifPlay( char* gifPath ) { // 0=infinite
+int gifPlay( char* gifPath )
+{ // 0=infinite
 
   gif.begin(BIG_ENDIAN_PIXELS);
 
@@ -198,7 +205,8 @@ int gifPlay( char* gifPath ) { // 0=infinite
 }
 
 
-int getGifInventory( const char* basePath ) {
+int getGifInventory( const char* basePath )
+{
   int amount = 0;
   GifRootFolder = M5STACK_SD.open(basePath);
   if(!GifRootFolder){
@@ -238,9 +246,10 @@ int getGifInventory( const char* basePath ) {
 
 
 
-void setup() {
+void setup()
+{
 
-  M5.begin(); // don't autostart SD
+  M5.begin();
 
   int attempts = 0;
   int maxAttempts = 50;
@@ -259,8 +268,10 @@ void setup() {
 
     if( attempts > maxAttempts ) {
       log_n("Giving up");
-      M5.setWakeupButton( BUTTON_B_PIN );
-      M5.powerOFF();
+      #if defined( ARDUINO_M5Stack_Core_ESP32 ) || defined( ARDUINO_M5STACK_FIRE ) || defined( ARDUINO_ODROID_ESP32 )// || defined( ARDUINO_M5STACK_Core2 )
+        M5.setWakeupButton( BUTTON_B_PIN );
+        M5.powerOFF();
+      #endif
     }
     delay( delayBetweenAttempts );
     M5.sd_begin();
@@ -277,7 +288,8 @@ void setup() {
 
 
 
-void loop() {
+void loop()
+{
 
   tft.clear();
 
