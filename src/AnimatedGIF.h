@@ -51,6 +51,11 @@
 #define LITTLE_ENDIAN_PIXELS 1
 
 enum {
+   GIF_PALETTE_RGB565 = 0, // default
+   GIF_PALETTE_RGB888
+};
+
+enum {
    GIF_SUCCESS = 0,
    GIF_DECODE_ERROR,
    GIF_TOO_WIDE,
@@ -80,7 +85,8 @@ typedef struct gif_draw_tag
     int y; // current line being drawn (0 = top line of image)
     int iWidth, iHeight; // size of this frame
     uint8_t *pPixels; // 8-bit source pixels for this line
-    uint16_t *pPalette; // little or big-endian RGB565 palette entries
+    uint16_t *pPalette; // little or big-endian RGB565 palette entries (default)
+    uint8_t *pPalette24; // RGB888 palette (optional)
     uint8_t ucTransparent; // transparent color
     uint8_t ucHasTransparency; // flag indicating the transparent color is in use
     uint8_t ucDisposalMethod; // frame disposal method
@@ -118,13 +124,14 @@ typedef struct gif_image_tag
     unsigned char *pPixels, *pOldPixels;
     unsigned char ucLineBuf[MAX_WIDTH]; // current line
     unsigned char ucFileBuf[FILE_BUF_SIZE]; // holds temp data and pixel stack
-    unsigned short pPalette[256];
-    unsigned short pLocalPalette[256]; // color palettes for GIF images
+    unsigned short pPalette[384]; // can hold RGB565 or RGB888 - set in begin()
+    unsigned short pLocalPalette[384]; // color palettes for GIF images
     unsigned char ucLZW[LZW_BUF_SIZE]; // holds 6 chunks (6x255) of GIF LZW data packed together
     unsigned short usGIFTable[4096];
     unsigned char ucGIFPixels[8192];
     unsigned char bEndOfFrame;
     unsigned char ucGIFBits, ucBackground, ucTransparent, ucCodeStart, ucMap, bUseLocalPalette, ucLittleEndian;
+    unsigned char ucPaletteType; // RGB565 or RGB888
 } GIFIMAGE;
 
 #ifdef __cplusplus
@@ -138,7 +145,7 @@ class AnimatedGIF
     int open(const char *szFilename, GIF_OPEN_CALLBACK *pfnOpen, GIF_CLOSE_CALLBACK *pfnClose, GIF_READ_CALLBACK *pfnRead, GIF_SEEK_CALLBACK *pfnSeek, GIF_DRAW_CALLBACK *pfnDraw);
     void close();
     void reset();
-    void begin(int iEndian);
+    void begin(int iEndian, unsigned char ucPaletteType = GIF_PALETTE_RGB565);
     int playFrame(bool bSync, int *delayMilliseconds);
     int getCanvasWidth();
     int getCanvasHeight();
@@ -154,7 +161,7 @@ class AnimatedGIF
     int GIF_openRAM(GIFIMAGE *pGIF, uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw);
     int GIF_openFile(GIFIMAGE *pGIF, const char *szFilename, GIF_DRAW_CALLBACK *pfnDraw);
     void GIF_close(GIFIMAGE *pGIF);
-    void GIF_begin(GIFIMAGE *pGIF, int iEndian);
+    void GIF_begin(GIFIMAGE *pGIF, int iEndian , unsigned char ucPaletteType);
     void GIF_reset(GIFIMAGE *pGIF);
     int GIF_playFrame(GIFIMAGE *pGIF, int *delayMilliseconds);
     int GIF_getCanvasWidth(GIFIMAGE *pGIF);

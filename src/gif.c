@@ -20,6 +20,10 @@
 //===========================================================================
 #include "AnimatedGIF.h"
 
+#ifdef HAL_ESP32_HAL_H_
+#define memcpy_P memcpy
+#endif
+
 static const unsigned char cGIFBits[9] = {1,4,4,4,8,8,8,8,8}; // convert odd bpp values to ones we can handle
 //static const unsigned char cGIFPass[8] = {8,0,8,4,4,2,2,1}; // GIF interlaced y delta
 
@@ -72,10 +76,11 @@ void GIF_close(GIFIMAGE *pGIF)
         (*pGIF->pfnClose)(pGIF->GIFFile.fHandle);
 } /* GIF_close() */
 
-void GIF_begin(GIFIMAGE *pGIF, int iEndian)
+void GIF_begin(GIFIMAGE *pGIF, int iEndian, unsigned char ucPaletteType)
 {
     memset(pGIF, 0, sizeof(GIFIMAGE));
     pGIF->ucLittleEndian = (iEndian == LITTLE_ENDIAN_PIXELS);
+    pGIF->ucPaletteType = ucPaletteType;
 } /* GIF_begin() */
 
 void GIF_reset(GIFIMAGE *pGIF)
@@ -255,20 +260,28 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
         pPage->ucGIFBits = 0;
         iOffset = 13;
         if (p[10] & 0x80) // global color table?
-        { // convert to byte-reversed RGB565 for immediate use
+        { // by default, convert to byte-reversed RGB565 for immediate use
             // Read enough additional data for the color table
             iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], 3*(1<<iColorTableBits));
-            for (i=0; i<(1<<iColorTableBits); i++)
+            if (pPage->ucPaletteType == GIF_PALETTE_RGB565)
             {
-                uint16_t usRGB565;
-                usRGB565 = ((p[iOffset] >> 3) << 11); // R
-                usRGB565 |= ((p[iOffset+1] >> 2) << 5); // G
-                usRGB565 |= (p[iOffset+2] >> 3); // B
-                if (pPage->ucLittleEndian)
-                    pPage->pPalette[i] = usRGB565;
-                else
-                    pPage->pPalette[i] = __builtin_bswap16(usRGB565); // SPI wants MSB first
-                iOffset += 3;
+                for (i=0; i<(1<<iColorTableBits); i++)
+                {
+                    uint16_t usRGB565;
+                    usRGB565 = ((p[iOffset] >> 3) << 11); // R
+                    usRGB565 |= ((p[iOffset+1] >> 2) << 5); // G
+                    usRGB565 |= (p[iOffset+2] >> 3); // B
+                    if (pPage->ucLittleEndian)
+                        pPage->pPalette[i] = usRGB565;
+                    else
+                        pPage->pPalette[i] = __builtin_bswap16(usRGB565); // SPI wants MSB first
+                    iOffset += 3;
+                }
+            }
+            else // just copy it as-is
+            {
+                memcpy(pPage->pPalette, &p[iOffset], (1<<iColorTableBits) * 3);
+                iOffset += (1 << iColorTableBits) * 3;
             }
         }
     }
@@ -383,21 +396,29 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
         return 0;
     }
     if (pPage->ucMap & 0x80) // local color table?
-    {// convert to byte-reversed RGB565 for immediate use
+    {// by default, convert to byte-reversed RGB565 for immediate use
         j = (1<<((pPage->ucMap & 7)+1));
         // Read enough additional data for the color table
         iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], j*3);            
-        for (i=0; i<j; i++)
+        if (pPage->ucPaletteType == GIF_PALETTE_RGB565)
         {
-            uint16_t usRGB565;
-            usRGB565 = ((p[iOffset] >> 3) << 11); // R
-            usRGB565 |= ((p[iOffset+1] >> 2) << 5); // G
-            usRGB565 |= (p[iOffset+2] >> 3); // B
-            if (pPage->ucLittleEndian)
-                pPage->pLocalPalette[i] = usRGB565;
-            else
-                pPage->pLocalPalette[i] = __builtin_bswap16(usRGB565); // SPI wants MSB first
-            iOffset += 3;
+            for (i=0; i<j; i++)
+            {
+                uint16_t usRGB565;
+                usRGB565 = ((p[iOffset] >> 3) << 11); // R
+                usRGB565 |= ((p[iOffset+1] >> 2) << 5); // G
+                usRGB565 |= (p[iOffset+2] >> 3); // B
+                if (pPage->ucLittleEndian)
+                    pPage->pLocalPalette[i] = usRGB565;
+                else
+                    pPage->pLocalPalette[i] = __builtin_bswap16(usRGB565); // SPI wants MSB first
+                iOffset += 3;
+            }
+        }
+        else // just copy it as-is
+        {
+            memcpy(pPage->pLocalPalette, &p[iOffset], j * 3);
+            iOffset += j*3;
         }
         pPage->bUseLocalPalette = 1;
     }
@@ -675,6 +696,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             gd.iHeight = pPage->iHeight;
             gd.pPixels = pPage->ucLineBuf;
             gd.pPalette = (pPage->bUseLocalPalette) ? pPage->pLocalPalette : pPage->pPalette;
+            gd.pPalette24 = (uint8_t *)gd.pPalette; // just cast the pointer for RGB888
             gd.y = pPage->iHeight - pPage->iYCount;
             gd.ucDisposalMethod = (pPage->ucGIFBits & 0x1c)>>2;
             gd.ucTransparent = pPage->ucTransparent;
@@ -713,11 +735,12 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     //unsigned char **index;
     uint32_t ulBits;
     unsigned short code;
+    (void)iOptions; // not used for now
     // if output can be used for string table, do it faster
     //       if (bGIF && (OutPage->cBitsperpixel == 8 && ((OutPage->iWidth & 3) == 0)))
     //          return PILFastLZW(InPage, OutPage, bGIF, iOptions);
     p = pImage->ucLZW; // un-chunked LZW data
-    sMask = -1 << (pImage->ucCodeStart + 1);
+    sMask = 0xffff << (pImage->ucCodeStart + 1);
     sMask = 0xffff - sMask;
     cc = (sMask >> 1) + 1; /* Clear code */
     eoi = cc + 1;
@@ -738,7 +761,7 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     }
 init_codetable:
     codesize = pImage->ucCodeStart + 1;
-    sMask = -1 << (pImage->ucCodeStart + 1);
+    sMask = 0xffff << (pImage->ucCodeStart + 1);
     sMask = 0xffff - sMask;
     nextcode = cc + 2;
     nextlim = (unsigned short) ((1 << codesize));

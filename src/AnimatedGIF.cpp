@@ -100,12 +100,15 @@ void AnimatedGIF::reset()
     (*_gif.pfnSeek)(&_gif.GIFFile, 0);
 } /* reset() */
 
-void AnimatedGIF::begin(int iEndian)
+void AnimatedGIF::begin(int iEndian, unsigned char ucPaletteType)
 {
     memset(&_gif, 0, sizeof(_gif));
     if (iEndian < LITTLE_ENDIAN_PIXELS || iEndian > BIG_ENDIAN_PIXELS)
         _gif.iError = GIF_INVALID_PARAMETER;
+    if (ucPaletteType != GIF_PALETTE_RGB565 && ucPaletteType != GIF_PALETTE_RGB888)
+	_gif.iError = GIF_INVALID_PARAMETER;
     _gif.ucLittleEndian = (iEndian == LITTLE_ENDIAN_PIXELS);
+    _gif.ucPaletteType = ucPaletteType;
 }
 //
 // Play a single frame
