@@ -44,6 +44,7 @@ static void closeFile(void *handle);
 // C API
 int GIF_openRAM(GIFIMAGE *pGIF, uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
 {
+    pGIF->iError = 0;
     pGIF->pfnRead = readMem;
     pGIF->pfnSeek = seekMem;
     pGIF->pfnDraw = pfnDraw;
@@ -56,6 +57,7 @@ int GIF_openRAM(GIFIMAGE *pGIF, uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK
 
 int GIF_openFile(GIFIMAGE *pGIF, const char *szFilename, GIF_DRAW_CALLBACK *pfnDraw)
 {
+    pGIF->iError = 0;
     pGIF->pfnRead = readFile;
     pGIF->pfnSeek = seekFile;
     pGIF->pfnDraw = pfnDraw;
@@ -244,12 +246,16 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
 
     if (iBytesRead != iReadSize) // we're at the end of the file
     {
-       return 0;
+        pPage->iError = GIF_EARLY_EOF;
+        return 0;
     }
     if (iStartPos == 0) // start of the file
     { // canvas size
-        if (memcmp(p, "GIF89", 5) != 0 && memcmp(p, "GIF87", 5) != 0) // not a GIF file
-           return 0; 
+        if ((memcmp(p, "GIF89", 5) != 0) && (memcmp(p, "GIF87", 5) != 0)) // not a GIF file
+        {
+            pPage->iError = GIF_NOT_A_GIF;
+            return 0; 
+        }
         pPage->iCanvasWidth = pPage->iWidth = INTELSHORT(&p[6]);
         pPage->iCanvasHeight = pPage->iHeight = INTELSHORT(&p[8]);
         pPage->iBpp = ((p[10] & 0x70) >> 4) + 1;

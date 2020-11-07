@@ -28,6 +28,7 @@
 //
 int AnimatedGIF::open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
 {
+    _gif.iError = 0;
     _gif.pfnRead = readMem;
     _gif.pfnSeek = seekMem;
     _gif.pfnDraw = pfnDraw;
@@ -77,16 +78,18 @@ int AnimatedGIF::getLastError()
 //
 int AnimatedGIF::open(const char *szFilename, GIF_OPEN_CALLBACK *pfnOpen, GIF_CLOSE_CALLBACK *pfnClose, GIF_READ_CALLBACK *pfnRead, GIF_SEEK_CALLBACK *pfnSeek, GIF_DRAW_CALLBACK *pfnDraw)
 {
+    _gif.iError = 0;
     _gif.pfnRead = pfnRead;
     _gif.pfnSeek = pfnSeek;
     _gif.pfnDraw = pfnDraw;
     _gif.pfnOpen = pfnOpen;
     _gif.pfnClose = pfnClose;
     _gif.GIFFile.fHandle = (*pfnOpen)(szFilename, &_gif.GIFFile.iSize);
-    if (_gif.GIFFile.fHandle == NULL)
-       return 0;
+    if (_gif.GIFFile.fHandle == NULL) {
+        _gif.iError = GIF_NO_FILE_HANDLE;
+        return 0;
+    }
     return GIFInit(&_gif);
-
 } /* open() */
 
 void AnimatedGIF::close()
@@ -103,10 +106,10 @@ void AnimatedGIF::reset()
 void AnimatedGIF::begin(int iEndian, unsigned char ucPaletteType)
 {
     memset(&_gif, 0, sizeof(_gif));
-    if (iEndian < LITTLE_ENDIAN_PIXELS || iEndian > BIG_ENDIAN_PIXELS)
+    if (iEndian < BIG_ENDIAN_PIXELS || iEndian > LITTLE_ENDIAN_PIXELS)
         _gif.iError = GIF_INVALID_PARAMETER;
     if (ucPaletteType != GIF_PALETTE_RGB565 && ucPaletteType != GIF_PALETTE_RGB888)
-	_gif.iError = GIF_INVALID_PARAMETER;
+	   _gif.iError = GIF_INVALID_PARAMETER;
     _gif.ucLittleEndian = (iEndian == LITTLE_ENDIAN_PIXELS);
     _gif.ucPaletteType = ucPaletteType;
 }
@@ -135,7 +138,7 @@ long lTime = millis();
     }
     else
     {
-        return 0; // error parsing the frame info, we may be at the end of the file
+        return -1; // error parsing the frame info, we may be at the end of the file
     }
     // Return 1 for more frames or 0 if this was the last frame
     if (bSync)
