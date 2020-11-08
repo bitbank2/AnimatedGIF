@@ -168,6 +168,7 @@ void setup() {
 void ShowGIF(char *name)
 {
   spilcdFill(0,1);
+  int frameStatus;
   
   if (gif.open(name, GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDraw))
   {
@@ -177,10 +178,18 @@ void ShowGIF(char *name)
     if (y_offset < 0) y_offset = 0;
     Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
     Serial.flush();
-    while (gif.playFrame(true, NULL))
-    {      
+    do
+    {
+      frameStatus = gif.playFrame(true, NULL);
+    } while (frameStatus > 0);
+    if(frameStatus < 0) {
+      Serial.print("playFrame failed: ");
+      Serial.println(gif.getLastError());
     }
     gif.close();
+  } else {
+    Serial.print("open failed: ");
+    Serial.println(gif.getLastError());
   }
 
 } /* ShowGIF() */
