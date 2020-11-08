@@ -364,6 +364,14 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                     while (c) /* Skip all data sub-blocks */
                     {
                         c = p[iOffset++]; /* Block length */
+                        if ((iBytesRead - iOffset) < (c+32)) // need to read more data first
+                        {
+                            memcpy(pPage->ucFileBuf, &pPage->ucFileBuf[iOffset], (iBytesRead-iOffset)); // move existing data down
+                            iBytesRead -= iOffset;
+                            iStartPos += iOffset;
+                            iOffset = 0;
+                            iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], c+32);
+                        }
                         if (pPage->iCommentPos == 0) // Save first block info
                         {
                             pPage->iCommentPos = iStartPos + iOffset;
@@ -380,8 +388,11 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
         }
         else // invalid byte, stop decoding
         {
-            /* Bad header info */
-            pPage->iError = GIF_DECODE_ERROR;
+            if (pPage->GIFFile.iSize - iStartPos < 32) // non-image bytes at end of file?
+                pPage->iError = GIF_EMPTY_FRAME;
+            else
+                /* Bad header info */
+                pPage->iError = GIF_DECODE_ERROR;
             return 0;
         }
     } /* while */

@@ -139,6 +139,13 @@ long lTime = millis();
     }
     else
     {
+        // The file is "malformed" in that there is a bunch of non-image data after
+        // the last frame. Suppress this error and return as if all is well
+        if (_gif.iError == GIF_EMPTY_FRAME)
+        {
+            _gif.iError = GIF_SUCCESS;
+            return 0;
+        }
         return -1; // error parsing the frame info, we may be at the end of the file
     }
     // Return 1 for more frames or 0 if this was the last frame
@@ -152,5 +159,5 @@ long lTime = millis();
     }
     if (delayMilliseconds) // if not NULL, return the frame delay time
         *delayMilliseconds = _gif.iFrameDelay;
-    return (_gif.GIFFile.iPos < _gif.GIFFile.iSize-1);
+    return (_gif.GIFFile.iPos < _gif.GIFFile.iSize-10);
 } /* playFrame() */
