@@ -105,7 +105,7 @@ void GIFDraw(GIFDRAW *pDraw)
     }
 } /* GIFDraw() */
 
-void * GIFOpenFile(char *fname, int32_t *pSize)
+void * GIFOpenFile(const char *fname, int32_t *pSize)
 {
   f = SD.open(fname);
   if (f)
@@ -165,7 +165,7 @@ void setup() {
   gif.begin(BIG_ENDIAN_PIXELS);
 }
 
-void ShowGIF(char *name)
+void ShowGIF(const char *name)
 {
   spilcdFill(0,1);
   int frameStatus;
