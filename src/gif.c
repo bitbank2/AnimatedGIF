@@ -44,6 +44,7 @@ static void closeFile(void *handle);
 // C API
 int GIF_openRAM(GIFIMAGE *pGIF, uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
 {
+    pGIF->iError = GIF_SUCCESS;
     pGIF->pfnRead = readMem;
     pGIF->pfnSeek = seekMem;
     pGIF->pfnDraw = pfnDraw;
@@ -56,6 +57,7 @@ int GIF_openRAM(GIFIMAGE *pGIF, uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK
 
 int GIF_openFile(GIFIMAGE *pGIF, const char *szFilename, GIF_DRAW_CALLBACK *pfnDraw)
 {
+    pGIF->iError = GIF_SUCCESS;
     pGIF->pfnRead = readFile;
     pGIF->pfnSeek = seekFile;
     pGIF->pfnDraw = pfnDraw;
@@ -88,6 +90,12 @@ void GIF_reset(GIFIMAGE *pGIF)
     (*pGIF->pfnSeek)(&pGIF->GIFFile, 0);
 } /* GIF_reset() */
 
+//
+// Return value:
+// 1 = good decode, more frames exist
+// 0 = good decode, no more frames
+// -1 = error
+//
 int GIF_playFrame(GIFIMAGE *pGIF, int *delayMilliseconds)
 {
 int rc;
@@ -100,11 +108,11 @@ int rc;
     {
         rc = DecodeLZW(pGIF, 0);
         if (rc != 0) // problem
-            return 0;
+            return -1;
     }
     else
     {
-        return 0; // error parsing the frame info, we may be at the end of the file
+        return -1; // error parsing the frame info, we may be at the end of the file
     }
     // Return 1 for more frames or 0 if this was the last frame
     if (delayMilliseconds) // if not NULL, return the frame delay time
@@ -244,12 +252,16 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
 
     if (iBytesRead != iReadSize) // we're at the end of the file
     {
+       pPage->iError = GIF_EARLY_EOF;
        return 0;
     }
     if (iStartPos == 0) // start of the file
     { // canvas size
         if (memcmp(p, "GIF89", 5) != 0 && memcmp(p, "GIF87", 5) != 0) // not a GIF file
-           return 0; 
+        {
+           pPage->iError = GIF_BAD_FILE;
+           return 0;
+        }
         pPage->iCanvasWidth = pPage->iWidth = INTELSHORT(&p[6]);
         pPage->iCanvasHeight = pPage->iHeight = INTELSHORT(&p[8]);
         pPage->iBpp = ((p[10] & 0x70) >> 4) + 1;
