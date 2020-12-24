@@ -35,11 +35,11 @@ AnimatedGIF gif;
 #include "../test_images/pattern.h"
 
                                 // ESP32 40MHz SPI single frame rendering performance
-                                // Note: no DMA parformance gain on smaller images or transparent pixel GIFs
-  #define GIF_IMAGE ucBadgers   //  No DMA  57 fps, DMA:  71fps
-//#define GIF_IMAGE ucHomer     //  No DMA 145 fps, DMA: 141 fps
-//#define GIF_IMAGE homer_tiny  //  No DMA 504 fps, DMA: 481 fps
-//#define GIF_IMAGE ucPattern   //  No DMA  78 fps, DMA:  78 fps
+                                // Note: no DMA performance gain on smaller images or transparent pixel GIFs
+  #define GIF_IMAGE ucBadgers   //  No DMA  63 fps, DMA:  71fps
+//#define GIF_IMAGE ucHomer     //  No DMA 162 fps, DMA: 141 fps
+//#define GIF_IMAGE homer_tiny  //  No DMA 564 fps, DMA: 481 fps
+//#define GIF_IMAGE ucPattern   //  No DMA  90 fps, DMA:  78 fps
 
 #include <SPI.h>
 #include <TFT_eSPI.h>
@@ -66,11 +66,13 @@ void loop()
   if (gif.open((uint8_t *)GIF_IMAGE, sizeof(GIF_IMAGE), GIFDraw))
   {
     Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
+    tft.startWrite(); // The TFT chip slect is locked low
     while (gif.playFrame(true, NULL))
     {
       yield();
     }
     gif.close();
+    tft.endWrite(); // Release TFT chip select for other SPI devices
   }
 }
 #else // Test maximum rendering speed
