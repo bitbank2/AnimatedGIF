@@ -41,6 +41,7 @@ int AnimatedGIF::open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
 
 //
 // Returns the first comment block found (if any)
+//
 int AnimatedGIF::getComment(char *pDest)
 {
 int32_t iOldPos;
@@ -52,6 +53,55 @@ int32_t iOldPos;
     pDest[_gif.sCommentLen] = 0; // zero terminate the string
     return (int)_gif.sCommentLen;
 } /* getComment() */
+
+//
+// Allocate a block of memory to hold the entire canvas (as 8-bpp)
+//
+int AnimatedGIF::allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
+{
+    if (_gif.iCanvasWidth > 0 && _gif.iCanvasHeight > 0 && _gif.pFrameBuffer == NULL)
+    {
+        // Allocate a little extra space for the current line
+        // as RGB565 or RGB888
+        int iCanvasSize = _gif.iCanvasWidth * (_gif.iCanvasHeight+3);
+        _gif.pFrameBuffer = (unsigned char *)(*pfnAlloc)(iCanvasSize);
+        if (_gif.pFrameBuffer == NULL)
+            return GIF_ERROR_MEMORY;
+        return GIF_SUCCESS;
+    }
+    return GIF_INVALID_PARAMETER;
+} /* allocFrameBuf() */
+//
+// Set the DRAW callback behavior to RAW (default)
+// or COOKED (requires allocating a frame buffer)
+//
+int AnimatedGIF::setDrawType(int iType)
+{
+    if (iType != GIF_DRAW_RAW && iType != GIF_DRAW_COOKED)
+        return GIF_INVALID_PARAMETER; // invalid drawing mode
+    _gif.ucDrawType = (uint8_t)iType;
+    return GIF_SUCCESS;
+} /* setDrawType() */
+//
+// Release the memory used by the frame buffer
+//
+int AnimatedGIF::freeFrameBuf(GIF_FREE_CALLBACK *pfnFree)
+{
+    if (_gif.pFrameBuffer)
+    {
+        (*pfnFree)(_gif.pFrameBuffer);
+        _gif.pFrameBuffer = NULL;
+        return GIF_SUCCESS;
+    }
+    return GIF_INVALID_PARAMETER;
+} /* freeFrameBuf() */
+//
+// Return a pointer to the frame buffer (if it was allocated)
+//
+uint8_t * AnimatedGIF::getFrameBuf()
+{
+    return _gif.pFrameBuffer;
+} /* getFrameBuf() */
 
 int AnimatedGIF::getCanvasWidth()
 {
@@ -113,7 +163,9 @@ void AnimatedGIF::begin(int iEndian, unsigned char ucPaletteType)
 	_gif.iError = GIF_INVALID_PARAMETER;
     _gif.ucLittleEndian = (iEndian == LITTLE_ENDIAN_PIXELS);
     _gif.ucPaletteType = ucPaletteType;
-}
+    _gif.ucDrawType = GIF_DRAW_RAW; // assume RAW pixel handling
+    _gif.pFrameBuffer = NULL;
+} /* begin() */
 //
 // Play a single frame
 // returns:

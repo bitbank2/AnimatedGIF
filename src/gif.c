@@ -658,6 +658,74 @@ static int GIFGetMoreData(GIFIMAGE *pPage)
         pPage->bEndOfFrame = 1;
     return (c != 0 && pPage->GIFFile.iPos < pPage->GIFFile.iSize); // more data available?
 } /* GIFGetMoreData() */
+//
+// Handle transparent pixels and disposal method
+// Used only when a frame buffer is allocated
+//
+static void DrawNewPixels(GIFIMAGE *pPage, GIFDRAW *pDraw)
+{
+    uint8_t *d, *s;
+    int x, iPitch = pPage->iCanvasWidth;
+
+    s = pDraw->pPixels;
+    d = &pPage->pFrameBuffer[pDraw->iX + (pDraw->y + pDraw->iY)  * iPitch]; // dest pointer in our complete canvas buffer
+    if (pDraw->ucDisposalMethod == 2) // restore to background color
+    {
+        memset(d, pDraw->ucBackground, pDraw->iWidth);
+    }
+    // Apply the new pixels to the main image
+    if (pDraw->ucHasTransparency) // if transparency used
+    {
+        uint8_t c, ucTransparent = pDraw->ucTransparent;
+        for (x=0; x<pDraw->iWidth; x++)
+        {
+            c = *s++;
+            if (c != ucTransparent)
+                *d = c;
+            d++;
+        }
+    }
+    else
+    {
+        memcpy(d, s, pDraw->iWidth); // just overwrite the old pixels
+    }
+} /* DrawNewPixels() */
+//
+// Convert current line of pixels through the palette
+// to either RGB565 or RGB888 output
+// Used only when a frame buffer has been allocated
+//
+static void ConvertNewPixels(GIFIMAGE *pPage, GIFDRAW *pDraw)
+{
+    uint8_t *d, *s;
+    int x;
+
+    s = &pPage->pFrameBuffer[(pPage->iCanvasWidth * (pDraw->iY + pDraw->y)) + pDraw->iX];
+    d = &pPage->pFrameBuffer[pPage->iCanvasHeight * pPage->iCanvasWidth]; // point past bottom of frame buffer
+    if (pPage->ucPaletteType == GIF_PALETTE_RGB565)
+    {
+        uint16_t *pPal, *pu16;
+        pPal = (uint16_t *)pDraw->pPalette;
+        pu16 = (uint16_t *)d;
+        for (x=0; x<pPage->iWidth; x++)
+        {
+            *pu16++ = pPal[*s++]; // convert to RGB565 pixels
+        }
+    }
+    else
+    {
+        uint8_t *pPal;
+        int pixel;
+        pPal = (uint8_t *)pDraw->pPalette;
+        for (x=0; x<pPage->iWidth; x++)
+        {
+            pixel = *s++;
+            *d++ = pPal[(pixel * 3) + 0]; // convert to RGB888 pixels
+            *d++ = pPal[(pixel * 3) + 1];
+            *d++ = pPal[(pixel * 3) + 2];
+        }
+    }
+} /* ConvertNewPixels() */
 
 //
 // GIFMakePels
@@ -725,6 +793,15 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             gd.ucTransparent = pPage->ucTransparent;
             gd.ucHasTransparency = pPage->ucGIFBits & 1;
             gd.ucBackground = pPage->ucBackground;
+            if (pPage->pFrameBuffer) // update the frame buffer
+            {
+                DrawNewPixels(pPage, &gd);
+                if (pPage->ucDrawType == GIF_DRAW_COOKED)
+                {
+                    ConvertNewPixels(pPage, &gd); // prepare for output
+                    gd.pPixels = &pPage->pFrameBuffer[pPage->iCanvasWidth * pPage->iCanvasHeight];
+                }
+            }
             (*pPage->pfnDraw)(&gd); // callback to handle this line
             pPage->iYCount--;
             buf = pPage->ucLineBuf;

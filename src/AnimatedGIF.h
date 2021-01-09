@@ -54,6 +54,15 @@ enum {
    GIF_PALETTE_RGB565 = 0, // default
    GIF_PALETTE_RGB888
 };
+//
+// Draw callback pixel type
+// RAW = 8-bit palettized pixels requiring transparent pixel handling
+// COOKED = 16 or 24-bpp fully rendered pixels ready for display
+//
+enum {
+   GIF_DRAW_RAW = 0,
+   GIF_DRAW_COOKED
+};
 
 enum {
    GIF_SUCCESS = 0,
@@ -64,7 +73,8 @@ enum {
    GIF_FILE_NOT_OPEN,
    GIF_EARLY_EOF,
    GIF_EMPTY_FRAME,
-   GIF_BAD_FILE
+   GIF_BAD_FILE,
+   GIF_ERROR_MEMORY
 };
 
 typedef struct gif_file_tag
@@ -103,7 +113,8 @@ typedef int32_t (GIF_SEEK_CALLBACK)(GIFFILE *pFile, int32_t iPosition);
 typedef void (GIF_DRAW_CALLBACK)(GIFDRAW *pDraw);
 typedef void * (GIF_OPEN_CALLBACK)(const char *szFilename, int32_t *pFileSize);
 typedef void (GIF_CLOSE_CALLBACK)(void *pHandle);
-
+typedef void * (GIF_ALLOC_CALLBACK)(uint32_t iSize);
+typedef void (GIF_FREE_CALLBACK)(void *buffer);
 //
 // our private structure to hold a GIF image decode state
 //
@@ -125,6 +136,7 @@ typedef struct gif_image_tag
     GIF_OPEN_CALLBACK *pfnOpen;
     GIF_CLOSE_CALLBACK *pfnClose;
     GIFFILE GIFFile;
+    unsigned char *pFrameBuffer;
     unsigned char *pPixels, *pOldPixels;
     unsigned char ucLineBuf[MAX_WIDTH]; // current line
     unsigned char ucFileBuf[FILE_BUF_SIZE]; // holds temp data and pixel stack
@@ -136,6 +148,7 @@ typedef struct gif_image_tag
     unsigned char bEndOfFrame;
     unsigned char ucGIFBits, ucBackground, ucTransparent, ucCodeStart, ucMap, bUseLocalPalette, ucLittleEndian;
     unsigned char ucPaletteType; // RGB565 or RGB888
+    unsigned char ucDrawType; // RAW or COOKED
 } GIFIMAGE;
 
 #ifdef __cplusplus
@@ -152,6 +165,10 @@ class AnimatedGIF
     void begin(int iEndian, unsigned char ucPaletteType = GIF_PALETTE_RGB565);
     int playFrame(bool bSync, int *delayMilliseconds);
     int getCanvasWidth();
+    int allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc);
+    int setDrawType(int iType);
+    int freeFrameBuf(GIF_FREE_CALLBACK *pfnFree);
+    uint8_t *getFrameBuf();
     int getCanvasHeight();
     int getInfo(GIFINFO *pInfo);
     int getLastError();
