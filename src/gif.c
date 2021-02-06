@@ -36,7 +36,7 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions);
 static int32_t readMem(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 static int32_t seekMem(GIFFILE *pFile, int32_t iPosition);
 int GIFGetInfo(GIFIMAGE *pPage, GIFINFO *pInfo);
-#if defined( __LINUX__ ) || defined( __MCUXPRESSO )
+#if defined( PICO_BUILD ) || defined( __LINUX__ ) || defined( __MCUXPRESSO )
 static int32_t readFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 static int32_t seekFile(GIFFILE *pFile, int32_t iPosition);
 static void closeFile(void *handle);
@@ -55,6 +55,7 @@ int GIF_openRAM(GIFIMAGE *pGIF, uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK
     return GIFInit(pGIF);
 } /* GIF_openRAM() */
 
+#ifdef __LINUX__
 int GIF_openFile(GIFIMAGE *pGIF, const char *szFilename, GIF_DRAW_CALLBACK *pfnDraw)
 {
     pGIF->iError = GIF_SUCCESS;
@@ -71,6 +72,7 @@ int GIF_openFile(GIFIMAGE *pGIF, const char *szFilename, GIF_DRAW_CALLBACK *pfnD
     fseek((FILE *)pGIF->GIFFile.fHandle, 0, SEEK_SET);
     return GIFInit(pGIF);
 } /* GIF_openFile() */
+#endif
 
 void GIF_close(GIFIMAGE *pGIF)
 {
@@ -161,7 +163,7 @@ static int32_t readMem(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen)
        iBytesRead = pFile->iSize - pFile->iPos;
     if (iBytesRead <= 0)
        return 0;
-    memcpy_P(pBuf, &pFile->pData[pFile->iPos], iBytesRead);
+    memcpy(pBuf, &pFile->pData[pFile->iPos], iBytesRead);
     pFile->iPos += iBytesRead;
     return iBytesRead;
 } /* readMem() */
@@ -644,7 +646,11 @@ static int GIFGetMoreData(GIFIMAGE *pPage)
         return 1; // frame is finished or buffer is already full; no need to read more data
     if (pPage->iLZWOff != 0)
     {
-      memcpy(pPage->ucLZW, &pPage->ucLZW[pPage->iLZWOff], pPage->iLZWSize - pPage->iLZWOff);
+// NB: memcpy() fails on some systems because the src and dest ptrs overlap
+// so copy the bytes in a simple loop to avoid problems
+      for (int i=0; i<pPage->iLZWSize - pPage->iLZWOff; i++) {
+         pPage->ucLZW[i] = pPage->ucLZW[i + pPage->iLZWOff];
+      }
       pPage->iLZWSize -= pPage->iLZWOff;
       pPage->iLZWOff = 0;
     }
