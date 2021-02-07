@@ -195,7 +195,6 @@ long lTime = millis();
         // the last frame. Suppress this error and return as if all is well
         if (_gif.iError == GIF_EMPTY_FRAME)
         {
-            _gif.iError = GIF_SUCCESS;
             return 0;
         }
         return -1; // error parsing the frame info, we may be at the end of the file
