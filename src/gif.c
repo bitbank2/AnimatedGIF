@@ -25,7 +25,6 @@
 #endif
 
 static const unsigned char cGIFBits[9] = {1,4,4,4,8,8,8,8,8}; // convert odd bpp values to ones we can handle
-//static const unsigned char cGIFPass[8] = {8,0,8,4,4,2,2,1}; // GIF interlaced y delta
 
 // forward references
 static int GIFInit(GIFIMAGE *pGIF);
@@ -102,6 +101,8 @@ int GIF_playFrame(GIFIMAGE *pGIF, int *delayMilliseconds)
 {
 int rc;
 
+    if (delayMilliseconds)
+       *delayMilliseconds = 0; // clear any old valid
     if (pGIF->GIFFile.iPos >= pGIF->GIFFile.iSize-1) // no more data exists
     {   
         (*pGIF->pfnSeek)(&pGIF->GIFFile, 0); // seek to start
@@ -245,6 +246,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
     
     pPage->bUseLocalPalette = 0; // assume no local palette
     pPage->bEndOfFrame = 0; // we're just getting started
+    pPage->iFrameDelay = 0; // may not have a gfx extension block
     iReadSize = (bInfoOnly) ? 12 : MAX_CHUNK_SIZE;
     // If you try to read past the EOF, the SD lib will return garbage data
     if (iStartPos + iReadSize > pPage->GIFFile.iSize)
@@ -415,11 +417,6 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
      pixel+1 = # bits per pixel for this image
      */
     pPage->ucMap = p[iOffset++];
-    if (pPage->ucMap & 0x40) // interlaced is not supported due to RAM requirements
-    {
-        pPage->iError = GIF_UNSUPPORTED_FEATURE;
-        return 0;
-    }
     if (pPage->ucMap & 0x80) // local color table?
     {// by default, convert to byte-reversed RGB565 for immediate use
         j = (1<<((pPage->ucMap & 7)+1));
@@ -795,6 +792,19 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             gd.pPalette = (pPage->bUseLocalPalette) ? pPage->pLocalPalette : pPage->pPalette;
             gd.pPalette24 = (uint8_t *)gd.pPalette; // just cast the pointer for RGB888
             gd.y = pPage->iHeight - pPage->iYCount;
+            // Ugly logic to handle the interlaced line position, but it
+            // saves having to have another set of state variables
+            if (pPage->ucMap & 0x40) { // interlaced?
+               int height = pPage->iHeight-1;
+               if (gd.y > height / 2)
+                  gd.y = gd.y * 2 - (height | 1);
+               else if (gd.y > height / 4)
+                  gd.y = gd.y * 4 - ((height & ~1) | 2);
+               else if (gd.y > height / 8)
+                  gd.y = gd.y * 8 - ((height & ~3) | 4);
+               else
+                  gd.y = gd.y * 8;
+            }
             gd.ucDisposalMethod = (pPage->ucGIFBits & 0x1c)>>2;
             gd.ucTransparent = pPage->ucTransparent;
             gd.ucHasTransparency = pPage->ucGIFBits & 1;
@@ -909,38 +919,6 @@ init_codetable:
             oldcode = code;
         }
     } /* while not end of LZW code stream */
-#ifdef NOT_USED
-    if (pImage->cMap & 0x40) /* Interlaced? */
-    { /* re-order the scan lines */
-        unsigned char *buf, *buf2;
-        int y, bitoff, iDest, iGifPass = 0;
-        i = lsize * pImage->iHeight; /* color bitmap size */
-        buf = (unsigned char *) pImage->pPixels; /* reset ptr to start of bitmap */
-        buf2 = (unsigned char *) malloc(i);
-        if (buf2 == NULL)
-        {
-            free(pImage->pPixels);
-            pImage->pPixels = NULL;
-            return -1;
-        }
-        y = 0;
-        for (i = 0; i<pImage->iHeight; i++)
-        {
-            iDest = y * lsize;
-            bitoff = i * lsize;
-            memcpy(&buf2[iDest], &buf[bitoff], lsize);
-            y += cGIFPass[iGifPass * 2];
-            if (y >= pImage->iHeight)
-            {
-                iGifPass++;
-                y = cGIFPass[iGifPass * 2 + 1];
-            }
-        }
-        free(buf); /* Free the old buffer */
-        i = lsize * pImage->iHeight; /* color bitmap size */
-        pImage->pPixels = buf2; /* Replace with corrected bitmap */
-    } /* If interlaced GIF */
-#endif // NOT_USED
     return 0;
 //gif_forced_error:
 //    free(pImage->pPixels);
