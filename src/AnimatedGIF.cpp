@@ -170,7 +170,7 @@ void AnimatedGIF::begin(int iEndian, unsigned char ucPaletteType)
 // Play a single frame
 // returns:
 // 1 = good result and more frames exist
-// 0 = good result and no more frames exist
+// 0 = no more frames exist, a frame may or may not have been played: use getLastError() and look for GIF_SUCCESS to know if a frame was played
 // -1 = error
 int AnimatedGIF::playFrame(bool bSync, int *delayMilliseconds)
 {
@@ -192,9 +192,12 @@ long lTime = millis();
     else
     {
         // The file is "malformed" in that there is a bunch of non-image data after
-        // the last frame. Suppress this error and return as if all is well
+        // the last frame. Return as if all is well, though if needed getLastError()
+        // can be used to see if a frame was actually processed:
+        // GIF_SUCCESS -> frame processed, GIF_EMPTY_FRAME -> no frame processed
         if (_gif.iError == GIF_EMPTY_FRAME)
         {
+            *delayMilliseconds = 0;
             return 0;
         }
         return -1; // error parsing the frame info, we may be at the end of the file
