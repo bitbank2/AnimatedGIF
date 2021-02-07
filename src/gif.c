@@ -109,6 +109,8 @@ int rc;
     }
     if (GIFParseInfo(pGIF, 0))
     {
+        if (pGIF->iError == GIF_EMPTY_FRAME) // don't try to decode it
+            return 0;
         rc = DecodeLZW(pGIF, 0);
         if (rc != 0) // problem
             return -1;
