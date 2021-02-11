@@ -197,7 +197,8 @@ long lTime = millis();
         // GIF_SUCCESS -> frame processed, GIF_EMPTY_FRAME -> no frame processed
         if (_gif.iError == GIF_EMPTY_FRAME)
         {
-            *delayMilliseconds = 0;
+	    if (delayMilliseconds)
+                *delayMilliseconds = 0;
             return 0;
         }
         return -1; // error parsing the frame info, we may be at the end of the file
