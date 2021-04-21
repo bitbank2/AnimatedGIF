@@ -19,6 +19,7 @@
 #define DISPLAY_HEIGHT 240
 
 AnimatedGIF gif;
+SPILCD lcd;
 File f;
 int x_offset, y_offset;
 
@@ -72,8 +73,8 @@ void GIFDraw(GIFDRAW *pDraw)
         } // while looking for opaque pixels
         if (iCount) // any opaque pixels?
         {
-          spilcdSetPosition(pDraw->iX+x+x_offset, y+y_offset, iCount, 1, 1);
-          spilcdWriteDataBlock((uint8_t *)usTemp, iCount*2, 1);
+          spilcdSetPosition(&lcd, pDraw->iX+x+x_offset, y+y_offset, iCount, 1, DRAW_TO_LCD);
+          spilcdWriteDataBlock(&lcd, (uint8_t *)usTemp, iCount*2, DRAW_TO_LCD);
           x += iCount;
           iCount = 0;
         }
@@ -100,12 +101,12 @@ void GIFDraw(GIFDRAW *pDraw)
       // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
       for (x=0; x<iWidth; x++)
         usTemp[x] = usPalette[*s++];
-      spilcdSetPosition(pDraw->iX+x_offset, y+y_offset, iWidth, 1, 1);
-      spilcdWriteDataBlock((uint8_t *)usTemp, iWidth*2, 1);
+      spilcdSetPosition(&lcd, pDraw->iX+x_offset, y+y_offset, iWidth, 1, DRAW_TO_LCD);
+      spilcdWriteDataBlock(&lcd, (uint8_t *)usTemp, iWidth*2, DRAW_TO_LCD);
     }
 } /* GIFDraw() */
 
-void * GIFOpenFile(char *fname, int32_t *pSize)
+void * GIFOpenFile(const char *fname, int32_t *pSize)
 {
   f = SD.open(fname);
   if (f)
@@ -161,13 +162,13 @@ void setup() {
   }
   Serial.println("SD Card init success!");
 
-  spilcdInit(LCD_ST7789, 0, 0, 0, 40000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN);
+  spilcdInit(&lcd, LCD_ST7789, FLAGS_NONE, 40000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN);
   gif.begin(BIG_ENDIAN_PIXELS);
 }
 
 void ShowGIF(char *name)
 {
-  spilcdFill(0,1);
+  spilcdFill(&lcd, 0, DRAW_TO_LCD);
   
   if (gif.open(name, GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDraw))
   {
