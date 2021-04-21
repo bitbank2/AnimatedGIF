@@ -29,7 +29,9 @@
 
 #define DISPLAY_WIDTH 320
 AnimatedGIF gif;
+#ifndef HAL_ESP32_HAL_H_
 uint8_t ucTXBuf[1024];
+#endif
 SPILCD lcd;
 
 //
@@ -69,7 +71,9 @@ void setup() {
   Serial.begin(115200);
 //  while (!Serial);
 
+#ifndef HAL_ESP32_HAL_H_
   spilcdSetTXBuffer(ucTXBuf, sizeof(ucTXBuf));
+#endif
   spilcdInit(&lcd, LCD_ILI9341, FLAGS_NONE, 8000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN); // custom ESP32 rig
   spilcdSetOrientation(&lcd, LCD_ORIENTATION_90);
   spilcdFill(&lcd, 0,DRAW_TO_LCD);
