@@ -21,7 +21,7 @@ int rc, iFrame;
     printf("Animated GIF Linux Demo\n");
     printf("Run with no parameters to test in-memory decoding\n");
     printf("Or pass a filename on the command line\n\n");
-    GIF_begin(&gif, BIG_ENDIAN_PIXELS);
+    GIF_begin(&gif, BIG_ENDIAN_PIXELS, GIF_PALETTE_RGB888);
     printf("Starting GIF decoder...\n");
     if (argc == 2) // use filename
         rc = GIF_openFile(&gif, argv[1], GIFDraw);
