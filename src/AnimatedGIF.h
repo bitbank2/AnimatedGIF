@@ -46,6 +46,11 @@
 #define MAX_HASH 5003
 #define MAXMAXCODE 4096
 
+// Validate GIF Defines configuration
+#if !(FILE_BUF_SIZE >= MAX_CHUNK_SIZE)
+# error "FILE_BUF_SIZE must be >= MAX_CHUNK_SIZE"
+#endif
+
 // RGB565 pixel byte order in the palette
 #define BIG_ENDIAN_PIXELS 0
 #define LITTLE_ENDIAN_PIXELS 1
