@@ -115,7 +115,7 @@ int AnimatedGIF::getCanvasHeight()
 
 int AnimatedGIF::getInfo(GIFINFO *pInfo)
 {
-   return GIFGetInfo(&_gif, pInfo);
+   return GIF_getInfo(&_gif, pInfo);
 } /* getInfo() */
 
 int AnimatedGIF::getLastError()
@@ -154,14 +154,11 @@ void AnimatedGIF::reset()
     (*_gif.pfnSeek)(&_gif.GIFFile, 0);
 } /* reset() */
 
-void AnimatedGIF::begin(int iEndian, unsigned char ucPaletteType)
+void AnimatedGIF::begin(unsigned char ucPaletteType)
 {
     memset(&_gif, 0, sizeof(_gif));
-    if (iEndian != LITTLE_ENDIAN_PIXELS && iEndian != BIG_ENDIAN_PIXELS)
+    if (ucPaletteType != GIF_PALETTE_RGB565_LE && ucPaletteType != GIF_PALETTE_RGB565_BE && ucPaletteType != GIF_PALETTE_RGB888)
         _gif.iError = GIF_INVALID_PARAMETER;
-    if (ucPaletteType != GIF_PALETTE_RGB565 && ucPaletteType != GIF_PALETTE_RGB888)
-	_gif.iError = GIF_INVALID_PARAMETER;
-    _gif.ucLittleEndian = (iEndian == LITTLE_ENDIAN_PIXELS);
     _gif.ucPaletteType = ucPaletteType;
     _gif.ucDrawType = GIF_DRAW_RAW; // assume RAW pixel handling
     _gif.pFrameBuffer = NULL;
@@ -172,7 +169,7 @@ void AnimatedGIF::begin(int iEndian, unsigned char ucPaletteType)
 // 1 = good result and more frames exist
 // 0 = no more frames exist, a frame may or may not have been played: use getLastError() and look for GIF_SUCCESS to know if a frame was played
 // -1 = error
-int AnimatedGIF::playFrame(bool bSync, int *delayMilliseconds)
+int AnimatedGIF::playFrame(bool bSync, int *delayMilliseconds, void *pUser)
 {
 int rc;
 #if !defined( __MACH__ ) && !defined( __LINUX__ )
@@ -185,6 +182,7 @@ long lTime = millis();
     }
     if (GIFParseInfo(&_gif, 0))
     {
+        _gif.pUser = pUser;
         rc = DecodeLZW(&_gif, 0);
         if (rc != 0) // problem
             return -1;

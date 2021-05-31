@@ -34,7 +34,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code);
 static int DecodeLZW(GIFIMAGE *pImage, int iOptions);
 static int32_t readMem(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 static int32_t seekMem(GIFFILE *pFile, int32_t iPosition);
-int GIFGetInfo(GIFIMAGE *pPage, GIFINFO *pInfo);
+int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo);
 #if defined( PICO_BUILD ) || defined( __LINUX__ ) || defined( __MCUXPRESSO )
 static int32_t readFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 static int32_t seekFile(GIFFILE *pFile, int32_t iPosition);
@@ -79,10 +79,9 @@ void GIF_close(GIFIMAGE *pGIF)
         (*pGIF->pfnClose)(pGIF->GIFFile.fHandle);
 } /* GIF_close() */
 
-void GIF_begin(GIFIMAGE *pGIF, int iEndian, unsigned char ucPaletteType)
+void GIF_begin(GIFIMAGE *pGIF, unsigned char ucPaletteType)
 {
     memset(pGIF, 0, sizeof(GIFIMAGE));
-    pGIF->ucLittleEndian = (iEndian == LITTLE_ENDIAN_PIXELS);
     pGIF->ucPaletteType = ucPaletteType;
 } /* GIF_begin() */
 
@@ -97,7 +96,7 @@ void GIF_reset(GIFIMAGE *pGIF)
 // 0 = good decode, no more frames
 // -1 = error
 //
-int GIF_playFrame(GIFIMAGE *pGIF, int *delayMilliseconds)
+int GIF_playFrame(GIFIMAGE *pGIF, int *delayMilliseconds, void *pUser)
 {
 int rc;
 
@@ -109,6 +108,7 @@ int rc;
     }
     if (GIFParseInfo(pGIF, 0))
     {
+        pGIF->pUser = pUser;
         if (pGIF->iError == GIF_EMPTY_FRAME) // don't try to decode it
             return 0;
         rc = DecodeLZW(pGIF, 0);
@@ -281,7 +281,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
         { // by default, convert to byte-reversed RGB565 for immediate use
             // Read enough additional data for the color table
             iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], 3*(1<<iColorTableBits));
-            if (pPage->ucPaletteType == GIF_PALETTE_RGB565)
+            if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE)
             {
                 for (i=0; i<(1<<iColorTableBits); i++)
                 {
@@ -289,7 +289,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                     usRGB565 = ((p[iOffset] >> 3) << 11); // R
                     usRGB565 |= ((p[iOffset+1] >> 2) << 5); // G
                     usRGB565 |= (p[iOffset+2] >> 3); // B
-                    if (pPage->ucLittleEndian)
+                    if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE)
                         pPage->pPalette[i] = usRGB565;
                     else
                         pPage->pPalette[i] = __builtin_bswap16(usRGB565); // SPI wants MSB first
@@ -424,7 +424,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
         j = (1<<((pPage->ucMap & 7)+1));
         // Read enough additional data for the color table
         iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], j*3);            
-        if (pPage->ucPaletteType == GIF_PALETTE_RGB565)
+        if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE)
         {
             for (i=0; i<j; i++)
             {
@@ -432,7 +432,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                 usRGB565 = ((p[iOffset] >> 3) << 11); // R
                 usRGB565 |= ((p[iOffset+1] >> 2) << 5); // G
                 usRGB565 |= (p[iOffset+2] >> 3); // B
-                if (pPage->ucLittleEndian)
+                if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE)
                     pPage->pLocalPalette[i] = usRGB565;
                 else
                     pPage->pLocalPalette[i] = __builtin_bswap16(usRGB565); // SPI wants MSB first
@@ -488,7 +488,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
 //
 // Gather info about an animated GIF file
 //
-int GIFGetInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
+int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
 {
     int iOff, iNumFrames;
     int iDelay, iMaxDelay, iMinDelay, iTotalDelay;
@@ -629,7 +629,7 @@ gifpagesz:
     pInfo->iMinDelay = iMinDelay;
     pInfo->iDuration = iTotalDelay;
     return 1;
-} /* GIFGetInfo() */
+} /* GIF_getInfo() */
 
 //
 // Unpack more chunk data for decoding
@@ -707,7 +707,7 @@ static void ConvertNewPixels(GIFIMAGE *pPage, GIFDRAW *pDraw)
 
     s = &pPage->pFrameBuffer[(pPage->iCanvasWidth * (pDraw->iY + pDraw->y)) + pDraw->iX];
     d = &pPage->pFrameBuffer[pPage->iCanvasHeight * pPage->iCanvasWidth]; // point past bottom of frame buffer
-    if (pPage->ucPaletteType == GIF_PALETTE_RGB565)
+    if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE)
     {
         uint16_t *pPal, *pu16;
         pPal = (uint16_t *)pDraw->pPalette;
@@ -811,6 +811,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             gd.ucTransparent = pPage->ucTransparent;
             gd.ucHasTransparency = pPage->ucGIFBits & 1;
             gd.ucBackground = pPage->ucBackground;
+            gd.pUser = pPage->pUser;
             if (pPage->pFrameBuffer) // update the frame buffer
             {
                 DrawNewPixels(pPage, &gd);
