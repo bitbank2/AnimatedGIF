@@ -51,6 +51,9 @@ enum {
    GIF_PALETTE_RGB565_BE,     // big endian
    GIF_PALETTE_RGB888         // original 24-bpp entries
 };
+// for compatibility with older code
+#define LITTLE_ENDIAN_PIXELS GIF_PALETTE_RGB565_LE
+#define BIG_ENDIAN_PIXELS GIF_PALETTE_RGB565_BE
 //
 // Draw callback pixel type
 // RAW = 8-bit palettized pixels requiring transparent pixel handling

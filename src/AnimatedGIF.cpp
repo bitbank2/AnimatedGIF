@@ -21,7 +21,7 @@
 #include "AnimatedGIF.h"
 
 // Here is all of the actual code...
-#include "gif.c"
+#include "gif.inl"
 
 //
 // Memory initialization
