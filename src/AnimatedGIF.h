@@ -165,6 +165,7 @@ class AnimatedGIF
     void close();
     void reset();
     void begin(unsigned char ucPaletteType = GIF_PALETTE_RGB565_LE);
+    void begin(int iEndian, unsigned char ucPaletteType) { begin(ucPaletteType); };
     int playFrame(bool bSync, int *delayMilliseconds, void *pUser = NULL);
     int getCanvasWidth();
     int allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc);
