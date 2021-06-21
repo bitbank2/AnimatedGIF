@@ -392,6 +392,11 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                     return 0;
             } /* switch */
         }
+        else if (p[iOffset] == ';') // Trailer Byte, End of the GIF Data Stream
+        {
+            pPage->iError = GIF_EMPTY_FRAME;
+            return 0;
+        }
         else // invalid byte, stop decoding
         {
             if (pPage->GIFFile.iSize - iStartPos < 32) // non-image bytes at end of file?
