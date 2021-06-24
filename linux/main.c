@@ -6,6 +6,8 @@
 //  Copyright © 2020 Laurence Bank. All rights reserved.
 //
 #include "../src/AnimatedGIF.h"
+#include "../src/gif.inl"
+
 #include "../test_images/badgers.h"
 
 GIFIMAGE gif;
@@ -32,7 +34,7 @@ int rc, iFrame;
         printf("Successfully opened GIF\n");
         printf("Image size: %d x %d\n", GIF_getCanvasWidth(&gif), GIF_getCanvasHeight(&gif));
         iFrame = 0;
-        while (GIF_playFrame(&gif, NULL))
+        while (GIF_playFrame(&gif, NULL, NULL))
         {
             iFrame++;
             printf("Successfully decoded frame %d\n", iFrame);
