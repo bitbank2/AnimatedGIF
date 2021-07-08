@@ -38,7 +38,7 @@ Features:<br>
 
 Acquiring GIF files to play:<br>
 ----------------------------<br>
-You'll notice that the images provided in the test_images folder have been turned into C code. Each byte is now in the form 0xAB so that it can be compiled into your program and stored in FLASH memory alongside your other code. You can use a command line tool called xxd to convert a binary file into this type of text. Make sure to add a **const** modifier in front of the GIF data array to ensure that it gets written to FLASH and not RAM by your build environment.<br>
+You'll notice that the images provided in the test_images folder have been turned into C code. Each byte is now in the form 0xAB so that it can be compiled into your program and stored in FLASH memory alongside your other code. You can use a command I wrote called image_to_c (https://github.com/bitbank2/image_to_c) to convert a binary file into this type of text. If you use another tool, make sure to add a **const** modifier in front of the GIF data array to ensure that it gets written to FLASH and not RAM by your build environment.<br>
 
 The Callback functions:<br>
 -----------------------<br>
