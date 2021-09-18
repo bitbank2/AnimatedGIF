@@ -155,12 +155,6 @@ void displaySetup()
   // This can be commented out for any smaller displays (but should work fine with it)
   mxconfig.gpio.e = 18;
 
-  mxconfig.gpio.b1 = 26;
-  mxconfig.gpio.b2 = 12;
-
-  mxconfig.gpio.g1 = 27;
-  mxconfig.gpio.g2 = 13;
-
   // May or may not be needed depending on your matrix
   // Example of what needing it looks like:
   // https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-I2S-DMA/issues/134#issuecomment-866367216
