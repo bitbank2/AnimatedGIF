@@ -42,7 +42,7 @@ void my_handler(int signal)
 //
 void ShowFrame(int bFullscreen)
 {
-uint32_t ulPixel, *pul;
+uint32_t ulPixel=0, *pul;
 uint8_t *s, *pPal;
 int pixel, x, y;
 
