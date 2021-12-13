@@ -1,6 +1,6 @@
 //
 //  main.cpp
-//  jpeg_test
+//  GIF decode timing demo
 //
 //  Created by Laurence Bank on 8/2/20.
 //  Copyright © 2020 Laurence Bank. All rights reserved.
