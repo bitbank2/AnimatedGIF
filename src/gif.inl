@@ -317,7 +317,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
             }
         }
     }
-    while (p[iOffset] != ',') /* Wait for image separator */
+    while (p[iOffset] != ',' && p[iOffset] != ';') /* Wait for image separator */
     {
         if (p[iOffset] == '!') /* Extension block */
         {
@@ -416,6 +416,11 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
             return 0;
         }
     } /* while */
+    if (p[iOffset] == ';') { // end of file, quit and return a correct error code
+        pPage->iError = GIF_EMPTY_FRAME;
+        return 1;
+    }
+
     if (p[iOffset] == ',')
         iOffset++;
     // This particular frame's size and position on the main frame (if animated)

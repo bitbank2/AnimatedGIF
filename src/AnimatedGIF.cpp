@@ -196,6 +196,8 @@ long lTime = millis();
     if (GIFParseInfo(&_gif, 0))
     {
         _gif.pUser = pUser;
+        if (_gif.iError == GIF_EMPTY_FRAME) // don't try to decode it
+            return 0;
         rc = DecodeLZW(&_gif, 0);
         if (rc != 0) // problem
             return -1;
