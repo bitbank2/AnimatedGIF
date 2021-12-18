@@ -39,6 +39,19 @@ int AnimatedGIF::open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
     return GIFInit(&_gif);
 } /* open() */
 
+int AnimatedGIF::openFLASH(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
+{
+    _gif.iError = GIF_SUCCESS;
+    _gif.pfnRead = readFLASH;
+    _gif.pfnSeek = seekMem;
+    _gif.pfnDraw = pfnDraw;
+    _gif.pfnOpen = NULL;
+    _gif.pfnClose = NULL;
+    _gif.GIFFile.iSize = iDataSize;
+    _gif.GIFFile.pData = pData;
+    return GIFInit(&_gif);
+} /* openFLASH() */
+
 //
 // Returns the first comment block found (if any)
 //
@@ -183,8 +196,6 @@ long lTime = millis();
     if (GIFParseInfo(&_gif, 0))
     {
         _gif.pUser = pUser;
-        if (_gif.iError == GIF_EMPTY_FRAME) // don't try to decode it
-            return 0;
         rc = DecodeLZW(&_gif, 0);
         if (rc != 0) // problem
             return -1;
