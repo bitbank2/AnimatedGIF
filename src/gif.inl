@@ -526,6 +526,8 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
     cBuf = (uint8_t *) pPage->ucFileBuf;
     (*pPage->pfnSeek)(&pPage->GIFFile, 0);
     iDataAvailable = (*pPage->pfnRead)(&pPage->GIFFile, cBuf, FILE_BUF_SIZE);
+    iDataRemaining -= iDataAvailable;
+    lFileOff += iDataAvailable;
     iOff = 10;
     c = cBuf[iOff]; // get info bits
     iOff += 3;   /* Skip flags, background color & aspect ratio */
@@ -539,6 +541,16 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
         bExt = 1; /* skip extension blocks */
         while (bExt && iOff < iDataAvailable)
         {
+            if ((iDataAvailable - iOff) < 258) // need to read more data first
+            {
+                memcpy(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
+                iDataAvailable -= iOff;
+                iOff = 0;
+                iReadAmount = (*pPage->pfnRead)(&pPage->GIFFile, &cBuf[iDataAvailable], FILE_BUF_SIZE-iDataAvailable);
+                iDataAvailable += iReadAmount;
+                iDataRemaining -= iReadAmount;
+                lFileOff += iReadAmount;
+            }
             switch(cBuf[iOff])
             {
                 case 0x3b: /* End of file */
@@ -568,10 +580,20 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
                     iOff++;
                    // block terminator or optional sub blocks
                     c = cBuf[iOff++]; /* Skip any sub-blocks */
-                    while (c && iOff < (iDataAvailable - c))
-                    {
-                        iOff += (int)c;
-                        c = cBuf[iOff++];
+                    while (c)
+                       {
+                       iOff += (int)c;
+                       c = cBuf[iOff++];
+                       if ((iDataAvailable - iOff) < (c+258)) // need to read more data first
+                        {
+                            memcpy(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
+                            iDataAvailable -= iOff;
+                            iOff = 0;
+                            iReadAmount = (*pPage->pfnRead)(&pPage->GIFFile, &cBuf[iDataAvailable], FILE_BUF_SIZE-iDataAvailable);
+                            iDataAvailable += iReadAmount;
+                            iDataRemaining -= iReadAmount;
+                            lFileOff += iReadAmount;
+                        }
                     }
                     if (c != 0) // problem, we went past the end
                     {
@@ -602,28 +624,47 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
             iOff += (2<<c)*3;
         }
         iOff++; /* Skip LZW code size byte */
+        if ((iDataAvailable - iOff) < (c+258)) // need to read more data first
+         {
+             if (iOff < iDataAvailable) {
+                 memcpy(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
+                 iDataAvailable -= iOff;
+                 iOff = 0;
+             } else { // already points beyond end
+                 iOff -= iDataAvailable;
+                 iDataAvailable = 0;
+             }
+             iReadAmount = (*pPage->pfnRead)(&pPage->GIFFile, &cBuf[iDataAvailable], FILE_BUF_SIZE-iDataAvailable);
+             iDataAvailable += iReadAmount;
+             iDataRemaining -= iReadAmount;
+             lFileOff += iReadAmount;
+         }
         c = cBuf[iOff++];
         while (c) /* While there are more data blocks */
         {
             if (iOff > (3*FILE_BUF_SIZE/4) && iDataRemaining > 0) /* Near end of buffer, re-align */
             {
-                lFileOff += iOff; /* adjust total file pointer */
-                iDataRemaining -= iOff;
-                iReadAmount = (iDataRemaining > FILE_BUF_SIZE) ? FILE_BUF_SIZE:iDataRemaining;
-                (*pPage->pfnSeek)(&pPage->GIFFile, lFileOff);
-                iDataAvailable = (*pPage->pfnRead)(&pPage->GIFFile, cBuf, iReadAmount);
-                iOff = 0; /* Start at beginning of buffer */
+                memcpy(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
+                iDataAvailable -= iOff;
+                iOff = 0;
+                iReadAmount = (FILE_BUF_SIZE - iDataAvailable);
+                if (iReadAmount > iDataRemaining)
+                    iReadAmount = iDataRemaining;
+                iReadAmount = (*pPage->pfnRead)(&pPage->GIFFile, &cBuf[iDataAvailable], iReadAmount);
+                iDataAvailable += iReadAmount;
+                iDataRemaining -= iReadAmount;
+                lFileOff += iReadAmount;
             }
             iOff += (int)c;  /* Skip this data block */
-            if ((int)lFileOff + iOff > pPage->GIFFile.iSize) // past end of file, stop
-            {
-                iNumFrames--; // don't count this page
-                break; // last page is corrupted, don't use it
-            }
+//            if ((int)lFileOff + iOff > pPage->GIFFile.iSize) // past end of file, stop
+//            {
+//                iNumFrames--; // don't count this page
+//                break; // last page is corrupted, don't use it
+//            }
             c = cBuf[iOff++]; /* Get length of next */
         }
         /* End of image data, check for more pages... */
-        if (((int)lFileOff + iOff > pPage->GIFFile.iSize) || cBuf[iOff] == 0x3b)
+        if (cBuf[iOff] == 0x3b || (iDataRemaining == 0 && (iDataAvailable - iOff) < 32))
         {
             bDone = 1; /* End of file has been reached */
         }
@@ -633,12 +674,16 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
              // read new page data starting at this offset
             if (pPage->GIFFile.iSize > FILE_BUF_SIZE && iDataRemaining > 0) // since we didn't read the whole file in one shot
             {
-                lFileOff += iOff; /* adjust total file pointer */
-                iDataRemaining -= iOff;
-                iReadAmount = (iDataRemaining > FILE_BUF_SIZE) ? FILE_BUF_SIZE : iDataRemaining;
-                (*pPage->pfnSeek)(&pPage->GIFFile, lFileOff);
-                iDataAvailable = (*pPage->pfnRead)(&pPage->GIFFile, cBuf, iReadAmount);
-                iOff = 0; /* Start at beginning of buffer */
+                memcpy(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
+                iDataAvailable -= iOff;
+                iOff = 0;
+                iReadAmount = (FILE_BUF_SIZE - iDataAvailable);
+                if (iReadAmount > iDataRemaining)
+                    iReadAmount = iDataRemaining;
+                iReadAmount = (*pPage->pfnRead)(&pPage->GIFFile, &cBuf[iDataAvailable], iReadAmount);
+                iDataAvailable += iReadAmount;
+                iDataRemaining -= iReadAmount;
+                lFileOff += iReadAmount;
             }
         }
     } /* while !bDone */
