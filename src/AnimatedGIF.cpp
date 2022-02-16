@@ -126,6 +126,11 @@ int AnimatedGIF::getCanvasHeight()
     return _gif.iCanvasHeight;
 } /* getCanvasHeight() */
 
+int AnimatedGIF::getLoopCount()
+{
+    return _gif.iRepeatCount;
+} /* getLoopCount() */
+
 int AnimatedGIF::getInfo(GIFINFO *pInfo)
 {
    return GIF_getInfo(&_gif, pInfo);

@@ -113,11 +113,11 @@ int rc;
             return 0;
         rc = DecodeLZW(pGIF, 0);
         if (rc != 0) // problem
-            return -1;
+            return 0;
     }
     else
     {
-        return -1; // error parsing the frame info, we may be at the end of the file
+        return 0; // error parsing the frame info, we may be at the end of the file
     }
     // Return 1 for more frames or 0 if this was the last frame
     if (delayMilliseconds) // if not NULL, return the frame delay time
@@ -134,6 +134,11 @@ int GIF_getCanvasHeight(GIFIMAGE *pGIF)
 {
     return pGIF->iCanvasHeight;
 } /* GIF_getCanvasHeight() */
+
+int GIF_getLoopCount(GIFIMAGE *pGIF)
+{
+    return pGIF->iRepeatCount;
+} /* GIF_getLoopCount() */
 
 int GIF_getComment(GIFIMAGE *pGIF, char *pDest)
 {
@@ -263,6 +268,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
     pPage->bUseLocalPalette = 0; // assume no local palette
     pPage->bEndOfFrame = 0; // we're just getting started
     pPage->iFrameDelay = 0; // may not have a gfx extension block
+    pPage->iRepeatCount = -1; // assume NETSCAPE loop count is not specified
     iReadSize = (bInfoOnly) ? 12 : MAX_CHUNK_SIZE;
     // If you try to read past the EOF, the SD lib will return garbage data
     if (iStartPos + iReadSize > pPage->GIFFile.iSize)
@@ -354,8 +360,8 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                         { // Netscape app block contains the repeat count
                             if (memcmp(&p[iOffset], "NETSCAPE2.0", 11) == 0)
                             {
-                                //                              if (p[iOffset+11] == 3 && p[iOffset+12] == 1) // loop count
-                                //                                  pPage->iRepeatCount = INTELSHORT(&p[iOffset+13]);
+                                if (p[iOffset+11] == 3 && p[iOffset+12] == 1) // loop count
+                                    pPage->iRepeatCount = INTELSHORT(&p[iOffset+13]);
                             }
                         }
                         iOffset += (int)c; /* Skip to next sub-block */

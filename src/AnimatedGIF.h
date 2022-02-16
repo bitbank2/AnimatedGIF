@@ -130,6 +130,7 @@ typedef struct gif_image_tag
     int iBpp;
     int iError; // last error
     int iFrameDelay; // delay in milliseconds for this frame
+    int iRepeatCount; // NETSCAPE animation repeat count. 0=forever
     int iXCount, iYCount; // decoding position in image (countdown values)
     int iLZWOff; // current LZW data offset
     int iLZWSize; // current quantity of data in the LZW buffer
@@ -178,6 +179,7 @@ class AnimatedGIF
     int freeFrameBuf(GIF_FREE_CALLBACK *pfnFree);
     uint8_t *getFrameBuf();
     int getCanvasHeight();
+    int getLoopCount();
     int getInfo(GIFINFO *pInfo);
     int getLastError();
     int getComment(char *destBuffer);
@@ -198,6 +200,7 @@ class AnimatedGIF
     int GIF_getComment(GIFIMAGE *pGIF, char *destBuffer);
     int GIF_getInfo(GIFIMAGE *pGIF, GIFINFO *pInfo);
     int GIF_getLastError(GIFIMAGE *pGIF);
+    int GIF_getLoopCount(GIFIMAGE *pGIF);
 #endif // __cplusplus
 
 // Due to unaligned memory causing an exception, we have to do these macros the slow way
