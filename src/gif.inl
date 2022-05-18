@@ -171,7 +171,7 @@ static int32_t readMem(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen)
        iBytesRead = pFile->iSize - pFile->iPos;
     if (iBytesRead <= 0)
        return 0;
-    memcpy(pBuf, &pFile->pData[pFile->iPos], iBytesRead);
+    memmove(pBuf, &pFile->pData[pFile->iPos], iBytesRead);
     pFile->iPos += iBytesRead;
     return iBytesRead;
 } /* readMem() */
@@ -350,7 +350,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                         c = p[iOffset++]; /* Block length */
                         if ((iBytesRead - iOffset) < (c+32)) // need to read more data first
                         {
-                            memcpy(pPage->ucFileBuf, &pPage->ucFileBuf[iOffset], (iBytesRead-iOffset)); // move existing data down
+                            memmove(pPage->ucFileBuf, &pPage->ucFileBuf[iOffset], (iBytesRead-iOffset)); // move existing data down
                             iBytesRead -= iOffset;
                             iStartPos += iOffset;
                             iOffset = 0;
@@ -392,7 +392,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                         c = p[iOffset++]; /* Block length */
                         if ((iBytesRead - iOffset) < (c+32)) // need to read more data first
                         {
-                            memcpy(pPage->ucFileBuf, &pPage->ucFileBuf[iOffset], (iBytesRead-iOffset)); // move existing data down
+                            memmove(pPage->ucFileBuf, &pPage->ucFileBuf[iOffset], (iBytesRead-iOffset)); // move existing data down
                             iBytesRead -= iOffset;
                             iStartPos += iOffset;
                             iOffset = 0;
@@ -549,7 +549,7 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
         {
             if ((iDataAvailable - iOff) < 258) // need to read more data first
             {
-                memcpy(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
+                memmove(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
                 iDataAvailable -= iOff;
                 iOff = 0;
                 iReadAmount = (*pPage->pfnRead)(&pPage->GIFFile, &cBuf[iDataAvailable], FILE_BUF_SIZE-iDataAvailable);
@@ -572,7 +572,7 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
                     {
                        //cBuf[iOff+3]; // page disposition flags
                         iDelay = cBuf[iOff+4]; // delay low byte
-                        iDelay |= (cBuf[iOff+5] << 8); // delay high byte
+                        iDelay |= ((uint16_t)(cBuf[iOff+5]) << 8); // delay high byte
                         if (iDelay < 2) // too fast, provide a default
                             iDelay = 2;
                         iDelay *= 10; // turn JIFFIES into milliseconds
@@ -592,7 +592,7 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
                        c = cBuf[iOff++];
                        if ((iDataAvailable - iOff) < (c+258)) // need to read more data first
                         {
-                            memcpy(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
+                            memmove(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
                             iDataAvailable -= iOff;
                             iOff = 0;
                             iReadAmount = (*pPage->pfnRead)(&pPage->GIFFile, &cBuf[iDataAvailable], FILE_BUF_SIZE-iDataAvailable);
@@ -633,7 +633,7 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
         if ((iDataAvailable - iOff) < (c+258)) // need to read more data first
          {
              if (iOff < iDataAvailable) {
-                 memcpy(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
+                 memmove(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
                  iDataAvailable -= iOff;
                  iOff = 0;
              } else { // already points beyond end
@@ -650,7 +650,7 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
         {
             if (iOff > (3*FILE_BUF_SIZE/4) && iDataRemaining > 0) /* Near end of buffer, re-align */
             {
-                memcpy(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
+                memmove(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
                 iDataAvailable -= iOff;
                 iOff = 0;
                 iReadAmount = (FILE_BUF_SIZE - iDataAvailable);
@@ -680,7 +680,7 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo)
              // read new page data starting at this offset
             if (pPage->GIFFile.iSize > FILE_BUF_SIZE && iDataRemaining > 0) // since we didn't read the whole file in one shot
             {
-                memcpy(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
+                memmove(cBuf, &cBuf[iOff], (iDataAvailable-iOff)); // move existing data down
                 iDataAvailable -= iOff;
                 iOff = 0;
                 iReadAmount = (FILE_BUF_SIZE - iDataAvailable);
