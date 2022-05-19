@@ -66,7 +66,7 @@ void loop()
   if (gif.open((uint8_t *)GIF_IMAGE, sizeof(GIF_IMAGE), GIFDraw))
   {
     Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
-    tft.startWrite(); // The TFT chip slect is locked low
+    tft.startWrite(); // The TFT chip select is locked low
     while (gif.playFrame(true, NULL))
     {
       yield();
@@ -83,7 +83,7 @@ void loop()
 
   if (gif.open((uint8_t *)GIF_IMAGE, sizeof(GIF_IMAGE), GIFDraw))
   {
-    tft.startWrite(); // For DMA the TFT chip slect is locked low
+    tft.startWrite(); // For DMA the TFT chip select is locked low
     while (gif.playFrame(false, NULL))
     {
       // Each loop renders one frame
