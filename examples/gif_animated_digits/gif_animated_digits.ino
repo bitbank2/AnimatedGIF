@@ -161,7 +161,7 @@ long lTime;
 
   priv.yoff = 72; // center digits vertically  
   iBusy = 0;
-  // mark digitis which need to change with a single bit flag
+  // mark digits which need to change with a single bit flag
   jn = iValue; jo = iOldValue;
   for (i=3; i>=0; i--) { // compare old and new values
     t0 = jn % 10; t1 = jo % 10;

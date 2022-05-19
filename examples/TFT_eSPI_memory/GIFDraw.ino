@@ -18,7 +18,7 @@ void GIFDraw(GIFDRAW *pDraw)
   uint16_t *d, *usPalette;
   int x, y, iWidth, iCount;
 
-  // Displ;ay bounds chech and cropping
+  // Display bounds check and cropping
   iWidth = pDraw->iWidth;
   if (iWidth + pDraw->iX > DISPLAY_WIDTH)
     iWidth = DISPLAY_WIDTH - pDraw->iX;

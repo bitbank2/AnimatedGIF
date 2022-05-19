@@ -52,7 +52,7 @@ One of the reasons that this is apparently the first universal GIF library for A
 
 ### Note:
 
-If you're using the ESP32 or ESP8266 and playing GIF images stored in RAM, you'll need to provide the 4 file callback functions or modify the existing ones because RAM and FLASH are in different adddress spaces (Harvard architecture). The code assumes the source of the GIF data is in FLASH and uses `memcpy_P()` instead of `memcpy()` to access it.
+If you're using the ESP32 or ESP8266 and playing GIF images stored in RAM, you'll need to provide the 4 file callback functions or modify the existing ones because RAM and FLASH are in different address spaces (Harvard architecture). The code assumes the source of the GIF data is in FLASH and uses `memcpy_P()` instead of `memcpy()` to access it.
 
 The API:
 --------
