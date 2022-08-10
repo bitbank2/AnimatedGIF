@@ -110,6 +110,7 @@ typedef struct gif_draw_tag
     uint8_t ucHasTransparency; // flag indicating the transparent color is in use
     uint8_t ucDisposalMethod; // frame disposal method
     uint8_t ucBackground; // background color
+    bool bIsGlobalPalette; // Flag to indicate that a global palette, rather than a local palette is being used
 } GIFDRAW;
 
 // Callback function prototypes
