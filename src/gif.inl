@@ -863,6 +863,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             gd.pPixels = pPage->ucLineBuf;
             gd.pPalette = (pPage->bUseLocalPalette) ? pPage->pLocalPalette : pPage->pPalette;
             gd.pPalette24 = (uint8_t *)gd.pPalette; // just cast the pointer for RGB888
+            gd.ucIsGlobalPalette = pPage->bUseLocalPalette==1?0:1;
             gd.y = pPage->iHeight - pPage->iYCount;
             // Ugly logic to handle the interlaced line position, but it
             // saves having to have another set of state variables
