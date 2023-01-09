@@ -930,9 +930,11 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     //       if (bGIF && (OutPage->cBitsperpixel == 8 && ((OutPage->iWidth & 3) == 0)))
     //          return PILFastLZW(InPage, OutPage, bGIF, iOptions);
     p = pImage->ucLZW; // un-chunked LZW data
-    sMask = 0xffff << (pImage->ucCodeStart + 1);
-    sMask = 0xffff - sMask;
-    cc = (sMask >> 1) + 1; /* Clear code */
+    //sMask = 0xffff << (pImage->ucCodeStart + 1);
+    //sMask = 0xffff - sMask;
+    //cc = (sMask >> 1) + 1; /* Clear code */
+    //eoi = cc + 1;
+    cc = 1 << pImage->ucCodeStart;
     eoi = cc + 1;
     giftabs = pImage->usGIFTable;
     gifpels = pImage->ucGIFPixels;
@@ -949,14 +951,18 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
         gifpels[PIXEL_FIRST + i] = gifpels[PIXEL_LAST + i] = (unsigned short) i;
         giftabs[i] = LINK_END;
     }
+    memset(&giftabs[cc], LINK_UNUSED, 2);
 init_codetable:
+    //codesize = pImage->ucCodeStart + 1;
+    //sMask = 0xffff << (pImage->ucCodeStart + 1);
+    //sMask = 0xffff - sMask;
     codesize = pImage->ucCodeStart + 1;
-    sMask = 0xffff << (pImage->ucCodeStart + 1);
-    sMask = 0xffff - sMask;
+	nextlim = ((1 << codesize));
+	sMask = nextlim - 1;
     nextcode = cc + 2;
     nextlim = (unsigned short) ((1 << codesize));
     // This part of the table needs to be reset multiple times
-    memset(&giftabs[cc], LINK_UNUSED, (4096 - cc)*sizeof(short));
+    //memset(&giftabs[cc], LINK_UNUSED, (4096 - cc)*sizeof(short));
     ulBits = INTELLONG(&p[pImage->iLZWOff]); // start by reading 4 bytes of LZW data
     GET_CODE
     if (code == cc) // we just reset the dictionary, so get another code
@@ -981,6 +987,11 @@ init_codetable:
                         gifpels[PIXEL_LAST + nextcode] = gifpels[PIXEL_FIRST + oldcode];
                     else
                         gifpels[PIXEL_LAST + nextcode] = gifpels[PIXEL_FIRST + code];
+                }
+                else
+                {
+                	if(nextcode < 4096) 
+                        giftabs[nextcode] = LINK_UNUSED;
                 }
                 nextcode++;
                 if (nextcode >= nextlim && codesize < 12)
