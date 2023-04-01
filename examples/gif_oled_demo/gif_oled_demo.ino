@@ -11,8 +11,8 @@ static uint8_t ucOLED[1024]; // holds current frame for 128x64 OLED
 
 // M5Atom Matrix ESP32
 #define RESET_PIN -1
-#define SDA_PIN 32
-#define SCL_PIN 26
+#define SDA_PIN -1
+#define SCL_PIN -1
 #define OLED_ADDR -1
 #define MY_OLED OLED_128x64
 #define USE_HW_I2C 1
@@ -107,7 +107,7 @@ void setup() {
 void loop() {
   if (gif.open((uint8_t *)ucPattern, sizeof(ucPattern), GIFDraw))
   {
-    Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
+//    Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
     while (gif.playFrame(true, NULL))
     {
     }

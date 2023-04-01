@@ -34,6 +34,14 @@
 
 /* GIF Defines and variables */
 #define MAX_CHUNK_SIZE 255
+//
+// These 2 macros can be changed to limit the amount of RAM
+// required by the decoder. For example, decoding 1-bit images to
+// a 128x32 display will not need a max code size of 12 nor a palette
+// with 256 entries
+//
+#define MAX_CODE_SIZE 12
+#define MAX_COLORS 256
 #define LZW_BUF_SIZE (6*MAX_CHUNK_SIZE)
 #define LZW_HIGHWATER (4*MAX_CHUNK_SIZE)
 #ifdef __LINUX__
@@ -41,14 +49,16 @@
 #else
 #define MAX_WIDTH 320
 #endif // __LINUX__
-#define FILE_BUF_SIZE 4096
+// This buffer is used to store the pixel sequence in reverse order
+// it needs to be large enough to hold the longest possible
+// sequence (1<<MAX_CODE_SIZE)
+#define FILE_BUF_SIZE (1<<MAX_CODE_SIZE)
 
 #define PIXEL_FIRST 0
-#define PIXEL_LAST 4096
+#define PIXEL_LAST (1<<MAX_CODE_SIZE)
 #define LINK_UNUSED 5911 // 0x1717 to use memset
 #define LINK_END 5912
 #define MAX_HASH 5003
-#define MAXMAXCODE 4096
 
 enum {
    GIF_PALETTE_RGB565_LE = 0, // little endian (default)
@@ -148,11 +158,11 @@ typedef struct gif_image_tag
     unsigned char *pPixels, *pOldPixels;
     unsigned char ucLineBuf[MAX_WIDTH]; // current line
     unsigned char ucFileBuf[FILE_BUF_SIZE]; // holds temp data and pixel stack
-    unsigned short pPalette[384]; // can hold RGB565 or RGB888 - set in begin()
-    unsigned short pLocalPalette[384]; // color palettes for GIF images
+    unsigned short pPalette[(MAX_COLORS * 3)/2]; // can hold RGB565 or RGB888 - set in begin()
+    unsigned short pLocalPalette[(MAX_COLORS * 3)/2]; // color palettes for GIF images
     unsigned char ucLZW[LZW_BUF_SIZE]; // holds 6 chunks (6x255) of GIF LZW data packed together
-    unsigned short usGIFTable[4096];
-    unsigned char ucGIFPixels[8192];
+    unsigned short usGIFTable[1<<MAX_CODE_SIZE];
+    unsigned char ucGIFPixels[(PIXEL_LAST*2)];
     unsigned char bEndOfFrame;
     unsigned char ucGIFBits, ucBackground, ucTransparent, ucCodeStart, ucMap, bUseLocalPalette;
     unsigned char ucPaletteType; // RGB565 or RGB888
