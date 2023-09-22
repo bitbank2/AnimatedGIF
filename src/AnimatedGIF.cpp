@@ -169,6 +169,7 @@ void AnimatedGIF::close()
 
 void AnimatedGIF::reset()
 {
+    _gif.iError = GIF_SUCCESS;
     (*_gif.pfnSeek)(&_gif.GIFFile, 0);
 } /* reset() */
 
