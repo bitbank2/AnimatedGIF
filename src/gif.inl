@@ -810,7 +810,6 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
     int iPixCount;
     unsigned short *giftabs;
     unsigned char *buf, *s, *pEnd, *gifpels;
-    unsigned char ucNeedMore = 0;
     /* Copy this string of sequential pixels to output buffer */
     //   iPixCount = 0;
     s = pPage->ucFileBuf + FILE_BUF_SIZE; /* Pixels will come out in reversed order */
@@ -841,8 +840,8 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
                 }
             pPage->iXCount -= iPixCount;
             //         iPixCount = 0;
-            if (ucNeedMore)
-                GIFGetMoreData(pPage); // check if we need to read more LZW data every 4 lines
+            if (pPage->iLZWOff >= LZW_HIGHWATER)
+                GIFGetMoreData(pPage); // We need to read more LZW data
             return;
         }
         else  /* Pixels cross into next line */
@@ -895,12 +894,10 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             (*pPage->pfnDraw)(&gd); // callback to handle this line
             pPage->iYCount--;
             buf = pPage->ucLineBuf;
-            if ((pPage->iYCount & 3) == 0) // since we support only small images...
-                ucNeedMore = 1;
         }
     } /* while */
-    if (ucNeedMore)
-        GIFGetMoreData(pPage); // check if we need to read more LZW data every 4 lines
+    if (pPage->iLZWOff >= LZW_HIGHWATER)
+        GIFGetMoreData(pPage); // We need to read more LZW data
     return;
 } /* GIFMakePels() */
 //
