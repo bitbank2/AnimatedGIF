@@ -20,8 +20,9 @@
 //===========================================================================
 #include "AnimatedGIF.h"
 
-#ifdef HAL_ESP32_HAL_H_
+#if defined( HAL_ESP32_HAL_H_ )
 #define memcpy_P memcpy
+#pragma GCC optimize("O2")
 #endif
 
 static const unsigned char cGIFBits[9] = {1,4,4,4,8,8,8,8,8}; // convert odd bpp values to ones we can handle
@@ -32,6 +33,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly);
 static int GIFGetMoreData(GIFIMAGE *pPage);
 static void GIFMakePels(GIFIMAGE *pPage, unsigned int code);
 static int DecodeLZW(GIFIMAGE *pImage, int iOptions);
+static int DecodeLZWTurbo(GIFIMAGE *pImage, int iOptions);
 static int32_t readMem(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 static int32_t seekMem(GIFFILE *pFile, int32_t iPosition);
 int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo);
@@ -111,7 +113,11 @@ int rc;
         pGIF->pUser = pUser;
         if (pGIF->iError == GIF_EMPTY_FRAME) // don't try to decode it
             return 0;
-        rc = DecodeLZW(pGIF, 0);
+        if (pGIF->pTurboBuffer) { // the presence of the Turbo buffer indicates Turbo mode
+            rc = DecodeLZWTurbo(pGIF, 0);
+        } else {
+            rc = DecodeLZW(pGIF, 0);
+        }
         if (rc != 0) // problem
             return 0;
     }
@@ -316,7 +322,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                     iOffset += 3;
                 }
             }
-            else // just copy it as-is
+            else // just copy it as-is (RGB888 & RGB8888 output)
             {
                 memcpy(pPage->pPalette, &p[iOffset], (1<<iColorTableBits) * 3);
                 iOffset += (1 << iColorTableBits) * 3;
@@ -709,9 +715,13 @@ gifpagesz:
 static int GIFGetMoreData(GIFIMAGE *pPage)
 {
     int iDelta = (pPage->iLZWSize - pPage->iLZWOff);
+    int iLZWBufSize;
     unsigned char c = 1;
+    
+    // Turbo mode uses combined buffers to read more compressed data
+    iLZWBufSize = (pPage->pTurboBuffer) ? LZW_BUF_SIZE_TURBO : LZW_BUF_SIZE;
     // move any existing data down
-    if (pPage->bEndOfFrame ||  iDelta >= (LZW_BUF_SIZE - MAX_CHUNK_SIZE) || iDelta <= 0)
+    if (pPage->bEndOfFrame ||  iDelta >= (iLZWBufSize - MAX_CHUNK_SIZE) || iDelta <= 0)
         return 1; // frame is finished or buffer is already full; no need to read more data
     if (pPage->iLZWOff != 0)
     {
@@ -723,7 +733,7 @@ static int GIFGetMoreData(GIFIMAGE *pPage)
       pPage->iLZWSize -= pPage->iLZWOff;
       pPage->iLZWOff = 0;
     }
-    while (c && pPage->GIFFile.iPos < pPage->GIFFile.iSize && pPage->iLZWSize < (LZW_BUF_SIZE-MAX_CHUNK_SIZE))
+    while (c && pPage->GIFFile.iPos < pPage->GIFFile.iSize && pPage->iLZWSize < (iLZWBufSize-MAX_CHUNK_SIZE))
     {
         (*pPage->pfnRead)(&pPage->GIFFile, &c, 1); // current length
         (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucLZW[pPage->iLZWSize], c);
@@ -733,6 +743,88 @@ static int GIFGetMoreData(GIFIMAGE *pPage)
         pPage->bEndOfFrame = 1;
     return (c != 0 && pPage->GIFFile.iPos < pPage->GIFFile.iSize); // more data available?
 } /* GIFGetMoreData() */
+//
+// Draw and convert pixels when the user wants fully rendered output
+//
+static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
+{
+    uint8_t *s, *pEnd;
+
+    s = pDraw->pPixels;
+    pEnd = s + pDraw->iWidth;
+    if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE) {
+        uint16_t *d, *pPal = (uint16_t *)pDraw->pPalette;
+
+        d = (uint16_t *)pDest; // dest pointer in our complete canvas buffer
+        // Apply the new pixels to the main image
+        if (pDraw->ucHasTransparency) { // if transparency used
+            uint8_t c, ucTransparent = pDraw->ucTransparent;
+            if (pDraw->ucDisposalMethod == 2) { // restore to background color
+                uint16_t u16BG = pPal[pDraw->ucBackground];
+                while (s < pEnd) {
+                    c = *s++;
+                    if (c != ucTransparent)
+                        *d++ = pPal[c];
+                    else
+                        *d++ = u16BG; // transparent pixel is restored to background color
+                }
+            } else { // no disposal, just write non-transparent pixels
+                while (s < pEnd) {
+                    c = *s++;
+                    if (c != ucTransparent)
+                        *d = pPal[c];
+                    d++;
+                }
+            }
+        } else { // convert all pixels through the palette
+#if REGISTER_WIDTH == 64
+            // parallelize the writes
+            // optimizing for the write buffer helps; reading 4 bytes at a time vs 1 doesn't on M1
+            while (s < pEnd + 4) { // group 4 pixels
+                BIGUINT bu;
+                uint8_t s0, s1, s2, s3;
+                uint16_t d1, d2, d3;
+                s0 = s[0]; s1 = s[1]; s2 = s[2]; s3 = s[3];
+                bu = pPal[s0]; // not much difference on Apple M1
+                d1 = pPal[s1]; // but other processors may gain
+                d2 = pPal[s2]; // from unrolling the reads
+                d3 = pPal[s3];
+                bu |= (BIGUINT)d1 << 16;
+                bu |= (BIGUINT)d2 << 32;
+                bu |= (BIGUINT)d3 << 48;
+                s += 4;
+                *(BIGUINT *)d = bu;
+                d += 4;
+            }
+#endif
+            while (s < pEnd) {
+                *d++ = pPal[*s++]; // just overwrite the old pixels
+            }
+        }
+    } else { // 24bpp or 32bpp
+        uint8_t pixel, *d, *pPal;
+        int x;
+        d = (uint8_t *)pDest;
+        pPal = (uint8_t *)pDraw->pPalette;
+        if (pPage->ucPaletteType == GIF_PALETTE_RGB888) {
+            for (x=0; x<pPage->iWidth; x++) {
+                pixel = *s++;
+                *d++ = pPal[(pixel * 3) + 0]; // convert to RGB888 pixels
+                *d++ = pPal[(pixel * 3) + 1];
+                *d++ = pPal[(pixel * 3) + 2];
+            }
+        } else { // must be RGBA32
+            for (x=0; x<pPage->iWidth; x++) {
+                pixel = *s++;
+                *d++ = pPal[(pixel * 3) + 0]; // convert to RGB8888 pixels
+                *d++ = pPal[(pixel * 3) + 1];
+                *d++ = pPal[(pixel * 3) + 2];
+                *d++ = 0xff;
+            }
+        }
+    }
+} /* DrawCooked() */
+
 //
 // Handle transparent pixels and disposal method
 // Used only when a frame buffer is allocated
@@ -744,24 +836,20 @@ static void DrawNewPixels(GIFIMAGE *pPage, GIFDRAW *pDraw)
 
     s = pDraw->pPixels;
     d = &pPage->pFrameBuffer[pDraw->iX + (pDraw->y + pDraw->iY)  * iPitch]; // dest pointer in our complete canvas buffer
-    if (pDraw->ucDisposalMethod == 2) // restore to background color
-    {
-        memset(d, pDraw->ucBackground, pDraw->iWidth);
-    }
+    
     // Apply the new pixels to the main image
-    if (pDraw->ucHasTransparency) // if transparency used
-    {
+    if (pDraw->ucHasTransparency) { // if transparency used
         uint8_t c, ucTransparent = pDraw->ucTransparent;
-        for (x=0; x<pDraw->iWidth; x++)
-        {
+        if (pDraw->ucDisposalMethod == 2) {
+            memset(d, pDraw->ucBackground, pDraw->iWidth); // start with background color
+        }
+        for (x=0; x<pDraw->iWidth; x++) {
             c = *s++;
             if (c != ucTransparent)
                 *d = c;
             d++;
         }
-    }
-    else
-    {
+    } else { // disposal method doesn't matter when there aren't any transparent pixels
         memcpy(d, s, pDraw->iWidth); // just overwrite the old pixels
     }
 } /* DrawNewPixels() */
@@ -777,23 +865,18 @@ static void ConvertNewPixels(GIFIMAGE *pPage, GIFDRAW *pDraw)
 
     s = &pPage->pFrameBuffer[(pPage->iCanvasWidth * (pDraw->iY + pDraw->y)) + pDraw->iX];
     d = &pPage->pFrameBuffer[pPage->iCanvasHeight * pPage->iCanvasWidth]; // point past bottom of frame buffer
-    if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE)
-    {
+    if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE) {
         uint16_t *pPal, *pu16;
         pPal = (uint16_t *)pDraw->pPalette;
         pu16 = (uint16_t *)d;
-        for (x=0; x<pPage->iWidth; x++)
-        {
+        for (x=0; x<pPage->iWidth; x++) {
             *pu16++ = pPal[*s++]; // convert to RGB565 pixels
         }
-    }
-    else
-    {
+    } else {
         uint8_t *pPal;
         int pixel;
         pPal = (uint8_t *)pDraw->pPalette;
-        for (x=0; x<pPage->iWidth; x++)
-        {
+        for (x=0; x<pPage->iWidth; x++) {
             pixel = *s++;
             *d++ = pPal[(pixel * 3) + 0]; // convert to RGB888 pixels
             *d++ = pPal[(pixel * 3) + 1];
@@ -801,6 +884,223 @@ static void ConvertNewPixels(GIFIMAGE *pPage, GIFDRAW *pDraw)
         }
     }
 } /* ConvertNewPixels() */
+//
+// LZWCopyBytes
+//
+// Output the bytes for a single code (checks for buffer len)
+//
+static int LZWCopyBytes(unsigned char *buf, int iOffset, uint32_t *pSymbols)
+{
+int iLen;
+uint8_t c, *s, *d, *pEnd;
+uint32_t u32Offset;
+
+    iLen = pSymbols[SYM_LENGTHS];
+    u32Offset = pSymbols[SYM_EXTRAS];
+    // The string data frequently writes past the end of the framebuffer (past last pixel)
+    // ...but with the placement of our code tables AFTER the framebuffer, it doesn't matter
+    // Adding a check for buffer overrun here slows everything down about 10%
+    s = &buf[pSymbols[SYM_OFFSETS]];
+    d = &buf[iOffset];
+    pEnd = &d[iLen];
+    while (d < pEnd) // most frequent are 1-8 bytes in length, copy 4 or 8 bytes in these cases too
+    {
+#ifdef ALLOWS_UNALIGNED
+// This is a significant perf improvement compared to copying 1 byte at a time
+        BIGUINT tmp = *(BIGUINT *) s;
+        s += sizeof(BIGUINT);
+        *(BIGUINT *)d = tmp;
+        d += sizeof(BIGUINT);
+#else
+// CPUs which enforce unaligned address exceptions
+        *d++ = *s++;
+#endif
+    }
+    d = pEnd; // in case we overshot
+    if (u32Offset != 0xffffffff) // was a newly used code
+    {
+        c = buf[u32Offset];
+        iLen++;
+        // since the code with extension byte has now been written to the output, fix the code
+        pSymbols[SYM_OFFSETS] = iOffset;
+        pSymbols[SYM_EXTRAS] = 0xffffffff;
+        *d = c;
+        pSymbols[SYM_LENGTHS] = iLen;
+    }
+    return iLen;
+} /* LZWCopyBytes() */
+//
+// Macro to extract a variable length code
+//
+#define GET_CODE_TURBO if (bitnum > (REGISTER_WIDTH - MAX_CODE_SIZE/*codesize*/)) { iLZWOff += (bitnum >> 3); \
+            bitnum &= 7; ulBits = INTELLONG(&p[iLZWOff]); } \
+        code = ((ulBits >> bitnum) & sMask);  \
+        bitnum += codesize;
+
+//
+// DecodeLZWTurbo
+//
+// Theory of operation:
+//
+// The 'traditional' LZW decoder maintains a dictionary with a linked list of codes.
+// These codes build into longer chains as more data is decoded. To output the pixels,
+// the linked list is traversed backwards from the last node to the first, then these
+// pixels are copied in reverse order to the output bitmap.
+//
+// My decoder takes a different approach. The output image becomes the dictionary and
+// the tables keep track of where in the output image the 'run' begins and its length.
+// ** NB **
+// These tables cannot be 16-bit values because a single dictionary's output can be
+// bigger than 64K
+//
+// I also work with the compressed data differently. Most decoders wind their way through
+// the chunked data by constantly checking if the current chunk has run out of data. I
+// take a different approach since modern machines have plenty of memory - I 'de-chunk'
+// the data first so that the inner loop can just decode as fast as possible. I also keep
+// a set of codes in a 64-bit local variable to minimize memory reads.
+//
+// These 2 changes result in a much faster decoder. For poorly compressed images, the
+// speed gain is about 2.5x compared to giflib. For well compressed images (long runs)
+// the speed can be as much as 30x faster. This is because it doesn't have to walk
+// backwards through the linked list of codes when outputting pixels. It also doesn't
+// have to copy pixels in reverse order, then unwind them.
+//
+static int DecodeLZWTurbo(GIFIMAGE *pImage, int iOptions)
+{
+int i, bitnum;
+int iUncompressedLen;
+uint32_t code, oldcode, codesize, nextcode, nextlim;
+uint32_t cc, eoi;
+uint32_t sMask;
+uint8_t c, *p, *buf, codestart;
+BIGUINT ulBits;
+int iLen, iColors;
+int iErr = GIF_SUCCESS;
+int iOffset, iLZWOff;
+uint32_t *pSymbols;
+
+    (void)iOptions;
+    p = pImage->ucLZW; // un-chunked LZW data
+    pImage->iYCount = pImage->iHeight; // count down the lines
+    pImage->iXCount = pImage->iWidth;
+    bitnum = 0;
+    pImage->iLZWOff = iLZWOff = 0; // Offset into compressed data
+    GIFGetMoreData(pImage); // Read some data to start
+    codestart = pImage->ucCodeStart;
+    iColors = 1 << codestart;
+    sMask = -1 << (codestart+1);
+    sMask = 0xffffffff - sMask;
+    cc = (sMask >> 1) + 1; /* Clear code */
+    eoi = cc + 1;
+    iUncompressedLen = (pImage->iWidth * pImage->iHeight);
+    buf = (uint8_t *)pImage->pTurboBuffer;
+    pSymbols = (uint32_t *)&buf[iUncompressedLen+256];
+    iOffset = 0; // output data offset
+    ulBits = INTELLONG(&p[iLZWOff]); // start by reading some LZW data
+    
+init_codetable:
+   for (i = 0; i<iColors; i++) {
+       pSymbols[i+SYM_OFFSETS] = iUncompressedLen + i; // root symbols
+       pSymbols[i+SYM_LENGTHS] = 1;
+       buf[iUncompressedLen + i] = (unsigned char) i;
+   }
+   memset(&pSymbols[iColors + SYM_LENGTHS], 0, (4096 - iColors) * sizeof(uint32_t));
+   memset(&pSymbols[iColors + SYM_OFFSETS], 0xff, (4096-iColors) * sizeof(uint32_t));
+   memset(&pSymbols[SYM_EXTRAS], 0xff, 4096 * sizeof(uint32_t));
+   codesize = codestart + 1;
+   sMask = -1 << (codestart+1);
+   sMask = 0xffffffff - sMask;
+   nextcode = cc + 2;
+   nextlim = (1 << codesize);
+    GET_CODE_TURBO
+    if (code == cc) { // we just reset the dictionary; get another code
+        GET_CODE_TURBO
+    }
+    buf[iOffset++] = (unsigned char) code; // first code after a reset is just stored
+    oldcode = code;
+    GET_CODE_TURBO
+    while (code != eoi && iOffset < iUncompressedLen) { /* Loop through all the data */
+        if (code == cc) { /* Clear code? */
+           goto init_codetable;
+        }
+        if (code != eoi) {
+            if (nextcode < nextlim) { // for deferred cc case, don't let it overwrite the last entry (fff)
+                if (pSymbols[code] == -1) { // new code
+                    uint32_t len = LZWCopyBytes(buf, iOffset, &pSymbols[oldcode]);
+                    pSymbols[nextcode + SYM_LENGTHS] = len+1;
+                    pSymbols[nextcode+SYM_OFFSETS] = iOffset;
+                    c = buf[iOffset];
+                    iOffset += len;
+                    buf[iOffset++] = c; // repeat first character of old code on the end
+                } else { // existing code
+                    iLen = LZWCopyBytes(buf, iOffset, &pSymbols[code]);
+                    pSymbols[nextcode+SYM_OFFSETS] = pSymbols[oldcode+SYM_OFFSETS];
+                    pSymbols[nextcode+SYM_EXTRAS] = iOffset;
+                    pSymbols[nextcode+SYM_LENGTHS] = pSymbols[oldcode+SYM_LENGTHS];
+                    iOffset += iLen;
+                }
+            } else { // Deferred CC case - continue to use codes, but don't generate new ones
+                iLen = LZWCopyBytes(buf, iOffset, &pSymbols[code]);
+                iOffset += iLen;
+            }
+            nextcode++;
+            if (nextcode >= nextlim && codesize < MAX_CODE_SIZE) {
+                codesize++;
+                nextlim <<= 1;
+                sMask = (sMask << 1) | 1;
+                if (pImage->iLZWOff >= LZW_HIGHWATER_TURBO) { // good place to see if we need more compressed data
+                    pImage->iLZWOff = iLZWOff; // restore object member var
+                    GIFGetMoreData(pImage); // We need to read more LZW data
+                    iLZWOff = pImage->iLZWOff;
+                }
+            }
+            oldcode = code;
+            GET_CODE_TURBO
+        } /* while not end of LZW code stream */
+    } // while not end of frame
+    if (pImage->ucDrawType == GIF_DRAW_COOKED || pImage->ucDrawType == GIF_DRAW_FULLFRAME) { // convert the frame buffer through the palette
+        GIFDRAW gd;
+        gd.iX = pImage->iX;
+        gd.iY = pImage->iY;
+        gd.iWidth = pImage->iWidth;
+        gd.iHeight = pImage->iHeight;
+        gd.pPalette = (pImage->bUseLocalPalette) ? pImage->pLocalPalette : pImage->pPalette;
+        gd.pPalette24 = (uint8_t *)gd.pPalette; // just cast the pointer for RGB888
+        gd.ucIsGlobalPalette = pImage->bUseLocalPalette==1?0:1;
+
+        for (int y=0; y<pImage->iHeight; y++) {
+            gd.y = y;
+            gd.pPixels = &buf[(y * pImage->iWidth)];
+            // Ugly logic to handle the interlaced line position, but it
+            // saves having to have another set of state variables
+            if (pImage->ucMap & 0x40) { // interlaced?
+               int height = pImage->iHeight-1;
+               if (gd.y > height / 2)
+                  gd.y = gd.y * 2 - (height | 1);
+               else if (gd.y > height / 4)
+                  gd.y = gd.y * 4 - ((height & ~1) | 2);
+               else if (gd.y > height / 8)
+                  gd.y = gd.y * 8 - ((height & ~3) | 4);
+               else
+                  gd.y = gd.y * 8;
+            }
+            gd.ucDisposalMethod = (pImage->ucGIFBits & 0x1c)>>2;
+            gd.ucTransparent = pImage->ucTransparent;
+            gd.ucHasTransparency = pImage->ucGIFBits & 1;
+            gd.ucBackground = pImage->ucBackground;
+            if (pImage->pFrameBuffer) { // the user provided another frame buffer for the de-palettized pixels
+                DrawCooked(pImage, &gd, &pImage->pFrameBuffer[(pImage->iX + (gd.y + pImage->iY) * pImage->iCanvasWidth) * sizeof(uint16_t)]);
+            } else { // no framebuffer means the user wants a callback for every line
+                DrawCooked(pImage, &gd, &buf[pImage->iCanvasHeight * pImage->iCanvasWidth]);
+                gd.pPixels = &buf[pImage->iCanvasHeight * pImage->iCanvasWidth]; // point to the line we just converted
+                if (pImage->pfnDraw) {
+                    (*pImage->pfnDraw)(&gd); // callback to handle this line
+                }
+            }
+        }
+    }
+    return iErr;
+} /* DecodeLZWTurbo() */
 
 //
 // GIFMakePels
@@ -884,14 +1184,18 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             gd.pUser = pPage->pUser;
             if (pPage->pFrameBuffer) // update the frame buffer
             {
-                DrawNewPixels(pPage, &gd);
-                if (pPage->ucDrawType == GIF_DRAW_COOKED)
-                {
-                    ConvertNewPixels(pPage, &gd); // prepare for output
+                if (pPage->ucDrawType == GIF_DRAW_COOKED) {
+                    DrawCooked(pPage, &gd, &pPage->pFrameBuffer[pPage->iCanvasWidth * pPage->iCanvasHeight]);
                     gd.pPixels = &pPage->pFrameBuffer[pPage->iCanvasWidth * pPage->iCanvasHeight];
+                } else if (pPage->ucDrawType == GIF_DRAW_FULLFRAME) {
+                    DrawCooked(pPage, &gd, &pPage->pFrameBuffer[(pPage->iX + (pPage->iCanvasWidth * (pPage->iY + gd.y)) * sizeof(uint16_t))]);
+                } else { // the user will manage converting them through the palette
+                    DrawNewPixels(pPage, &gd);
                 }
             }
-            (*pPage->pfnDraw)(&gd); // callback to handle this line
+            if (pPage->pfnDraw) {
+                (*pPage->pfnDraw)(&gd); // callback to handle this line
+            }
             pPage->iYCount--;
             buf = pPage->ucLineBuf;
         }
@@ -905,9 +1209,8 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
 //
 #define GET_CODE if (bitnum > (REGISTER_WIDTH - codesize)) { pImage->iLZWOff += (bitnum >> 3); \
             bitnum &= 7; ulBits = INTELLONG(&p[pImage->iLZWOff]); } \
-        code = (unsigned short) (ulBits >> bitnum); /* Read a 32-bit chunk */ \
+        code = (unsigned short) (ulBits >> bitnum); /* Read a REGISTER_WIDTH chunk */ \
         code &= sMask; bitnum += codesize;
-
 //
 // Decode LZW into an image
 //
@@ -920,7 +1223,7 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     unsigned char *gifpels, *p;
     //    int iStripSize;
     //unsigned char **index;
-    uint32_t ulBits;
+    BIGUINT ulBits;
     unsigned short code;
     (void)iOptions; // not used for now
     // if output can be used for string table, do it faster
