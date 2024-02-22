@@ -889,51 +889,52 @@ static void ConvertNewPixels(GIFIMAGE *pPage, GIFDRAW *pDraw)
 //
 // Output the bytes for a single code (checks for buffer len)
 //
-static int LZWCopyBytes(unsigned char *buf, int iOffset, uint32_t *pSymbols)
+static int LZWCopyBytes(unsigned char *buf, int iOffset, uint32_t *pSymbols, uint16_t *pLengths)
 {
 int iLen;
 uint8_t c, *s, *d, *pEnd;
 uint32_t u32Offset;
 
-    iLen = pSymbols[SYM_LENGTHS];
-    u32Offset = pSymbols[SYM_EXTRAS];
+    iLen = *pLengths;
+    u32Offset = *pSymbols;
     // The string data frequently writes past the end of the framebuffer (past last pixel)
     // ...but with the placement of our code tables AFTER the framebuffer, it doesn't matter
     // Adding a check for buffer overrun here slows everything down about 10%
-    s = &buf[pSymbols[SYM_OFFSETS]];
+    s = &buf[u32Offset & 0x7fffff];
     d = &buf[iOffset];
     pEnd = &d[iLen];
     while (d < pEnd) // most frequent are 1-8 bytes in length, copy 4 or 8 bytes in these cases too
     {
 #ifdef ALLOWS_UNALIGNED
 // This is a significant perf improvement compared to copying 1 byte at a time
+// even though it will often copy too many bytes
         BIGUINT tmp = *(BIGUINT *) s;
         s += sizeof(BIGUINT);
         *(BIGUINT *)d = tmp;
         d += sizeof(BIGUINT);
 #else
-// CPUs which enforce unaligned address exceptions
+// CPUs which enforce unaligned address exceptions must do it 1 byte at a time
         *d++ = *s++;
 #endif
     }
-    d = pEnd; // in case we overshot
-    if (u32Offset != 0xffffffff) // was a newly used code
+    if (u32Offset & 0x800000) // was a newly used code
     {
-        c = buf[u32Offset];
+        d = pEnd; // in case we overshot
+        c = (uint8_t)(u32Offset >> 24);
         iLen++;
         // since the code with extension byte has now been written to the output, fix the code
-        pSymbols[SYM_OFFSETS] = iOffset;
-        pSymbols[SYM_EXTRAS] = 0xffffffff;
+        *pSymbols = iOffset;
+//        pSymbols[SYM_EXTRAS] = 0xffffffff;
         *d = c;
-        pSymbols[SYM_LENGTHS] = iLen;
+        *pLengths = (uint16_t)iLen;
     }
     return iLen;
 } /* LZWCopyBytes() */
 //
 // Macro to extract a variable length code
 //
-#define GET_CODE_TURBO if (bitnum > (REGISTER_WIDTH - MAX_CODE_SIZE/*codesize*/)) { iLZWOff += (bitnum >> 3); \
-            bitnum &= 7; ulBits = INTELLONG(&p[iLZWOff]); } \
+#define GET_CODE_TURBO if (bitnum > (REGISTER_WIDTH - MAX_CODE_SIZE/*codesize*/)) { p += (bitnum >> 3); \
+            bitnum &= 7; ulBits = INTELLONG(p); } \
         code = ((ulBits >> bitnum) & sMask);  \
         bitnum += codesize;
 
@@ -976,15 +977,15 @@ uint8_t c, *p, *buf, codestart;
 BIGUINT ulBits;
 int iLen, iColors;
 int iErr = GIF_SUCCESS;
-int iOffset, iLZWOff;
+int iOffset;
 uint32_t *pSymbols;
+uint16_t *pLengths;
 
     (void)iOptions;
-    p = pImage->ucLZW; // un-chunked LZW data
     pImage->iYCount = pImage->iHeight; // count down the lines
     pImage->iXCount = pImage->iWidth;
     bitnum = 0;
-    pImage->iLZWOff = iLZWOff = 0; // Offset into compressed data
+    pImage->iLZWOff = 0; // Offset into compressed data
     GIFGetMoreData(pImage); // Read some data to start
     codestart = pImage->ucCodeStart;
     iColors = 1 << codestart;
@@ -994,19 +995,18 @@ uint32_t *pSymbols;
     eoi = cc + 1;
     iUncompressedLen = (pImage->iWidth * pImage->iHeight);
     buf = (uint8_t *)pImage->pTurboBuffer;
-    pSymbols = (uint32_t *)&buf[iUncompressedLen+256];
+    pSymbols = (uint32_t *)&buf[iUncompressedLen+256]; // we need 32-bits (really 23) for the offsets
+    pLengths = (uint16_t *)&pSymbols[4096]; // but only 16-bits for the length of any single string
     iOffset = 0; // output data offset
-    ulBits = INTELLONG(&p[iLZWOff]); // start by reading some LZW data
-    
-init_codetable:
+    p = pImage->ucLZW; // un-chunked LZW data
+    ulBits = INTELLONG(p); // start by reading some LZW data
+    // set up the default symbols (0..iColors-1)
    for (i = 0; i<iColors; i++) {
-       pSymbols[i+SYM_OFFSETS] = iUncompressedLen + i; // root symbols
-       pSymbols[i+SYM_LENGTHS] = 1;
+       pSymbols[i] = iUncompressedLen + i; // root symbols
+       pLengths[i] = 1;
        buf[iUncompressedLen + i] = (unsigned char) i;
    }
-   memset(&pSymbols[iColors + SYM_LENGTHS], 0, (4096 - iColors) * sizeof(uint32_t));
-   memset(&pSymbols[iColors + SYM_OFFSETS], 0xff, (4096-iColors) * sizeof(uint32_t));
-   memset(&pSymbols[SYM_EXTRAS], 0xff, 4096 * sizeof(uint32_t));
+init_codetable:
    codesize = codestart + 1;
    sMask = -1 << (codestart+1);
    sMask = 0xffffffff - sMask;
@@ -1016,7 +1016,7 @@ init_codetable:
     if (code == cc) { // we just reset the dictionary; get another code
         GET_CODE_TURBO
     }
-    buf[iOffset++] = (unsigned char) code; // first code after a reset is just stored
+    buf[iOffset++] = (unsigned char) code; // first code after a dictionary reset is just stored
     oldcode = code;
     GET_CODE_TURBO
     while (code != eoi && iOffset < iUncompressedLen) { /* Loop through all the data */
@@ -1025,22 +1025,21 @@ init_codetable:
         }
         if (code != eoi) {
             if (nextcode < nextlim) { // for deferred cc case, don't let it overwrite the last entry (fff)
-                if (pSymbols[code] == -1) { // new code
-                    uint32_t len = LZWCopyBytes(buf, iOffset, &pSymbols[oldcode]);
-                    pSymbols[nextcode + SYM_LENGTHS] = len+1;
-                    pSymbols[nextcode+SYM_OFFSETS] = iOffset;
+                if (code == nextcode) { // new code
+                    iLen = LZWCopyBytes(buf, iOffset, &pSymbols[oldcode], &pLengths[oldcode]);
+                    pLengths[nextcode] = iLen+1;
+                    pSymbols[nextcode] = iOffset;
                     c = buf[iOffset];
-                    iOffset += len;
+                    iOffset += iLen;
                     buf[iOffset++] = c; // repeat first character of old code on the end
                 } else { // existing code
-                    iLen = LZWCopyBytes(buf, iOffset, &pSymbols[code]);
-                    pSymbols[nextcode+SYM_OFFSETS] = pSymbols[oldcode+SYM_OFFSETS];
-                    pSymbols[nextcode+SYM_EXTRAS] = iOffset;
-                    pSymbols[nextcode+SYM_LENGTHS] = pSymbols[oldcode+SYM_LENGTHS];
+                    iLen = LZWCopyBytes(buf, iOffset, &pSymbols[code], &pLengths[code]);
+                    pSymbols[nextcode] = (pSymbols[oldcode] | 0x800000 | (buf[iOffset] << 24));
+                    pLengths[nextcode] = pLengths[oldcode];
                     iOffset += iLen;
                 }
             } else { // Deferred CC case - continue to use codes, but don't generate new ones
-                iLen = LZWCopyBytes(buf, iOffset, &pSymbols[code]);
+                iLen = LZWCopyBytes(buf, iOffset, &pSymbols[code], &pLengths[code]);
                 iOffset += iLen;
             }
             nextcode++;
@@ -1048,10 +1047,10 @@ init_codetable:
                 codesize++;
                 nextlim <<= 1;
                 sMask = (sMask << 1) | 1;
-                if (pImage->iLZWOff >= LZW_HIGHWATER_TURBO) { // good place to see if we need more compressed data
-                    pImage->iLZWOff = iLZWOff; // restore object member var
+                if (p >= &pImage->ucLZW[LZW_HIGHWATER_TURBO]) { // good place to see if we need more compressed data
+                    pImage->iLZWOff = (int)(p - pImage->ucLZW); // restore object member var
                     GIFGetMoreData(pImage); // We need to read more LZW data
-                    iLZWOff = pImage->iLZWOff;
+                    p = &pImage->ucLZW[pImage->iLZWOff];
                 }
             }
             oldcode = code;
@@ -1112,36 +1111,44 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
     unsigned char *buf, *s, *pEnd, *gifpels;
     /* Copy this string of sequential pixels to output buffer */
     //   iPixCount = 0;
-    s = pPage->ucFileBuf + FILE_BUF_SIZE; /* Pixels will come out in reversed order */
+    pEnd = pPage->ucFileBuf;
+    s = pEnd + FILE_BUF_SIZE; /* Pixels will come out in reversed order */
     buf = pPage->ucLineBuf + (pPage->iWidth - pPage->iXCount);
     giftabs = pPage->usGIFTable;
     gifpels = &pPage->ucGIFPixels[PIXEL_LAST];
     while (code < LINK_UNUSED)
     {
-        if (s == pPage->ucFileBuf) /* Houston, we have a problem */
+        if (s == pEnd) /* Houston, we have a problem */
         {
             return; /* Exit with error */
         }
         *(--s) = gifpels[code];
         code = giftabs[code];
     }
-    iPixCount = (int)(intptr_t)(pPage->ucFileBuf + FILE_BUF_SIZE - s);
+    iPixCount = (int)(intptr_t)(pEnd + FILE_BUF_SIZE - s);
     
     while (iPixCount && pPage->iYCount > 0)
     {
         if (pPage->iXCount > iPixCount)  /* Pixels fit completely on the line */
         {
-                //            memcpy(buf, s, iPixCount);
-                //            buf += iPixCount;
-                pEnd = buf + iPixCount;
-                while (buf < pEnd)
-                {
-                    *buf++ = *s++;
-                }
+            pEnd = buf + iPixCount;
+            while (buf < pEnd) {
+#ifdef ALLOWS_UNALIGNED
+// This is a significant perf improvement compared to copying 1 byte at a time
+// even though it will often copy too many bytes. Since we're not at the end of
+// the line, it's okay to copy a few extra pixels.
+                BIGUINT tmp = *(BIGUINT *) s;
+                s += sizeof(BIGUINT);
+                *(BIGUINT *)buf = tmp;
+                buf += sizeof(BIGUINT);
+#else
+                *buf++ = *s++;
+#endif
+            }
             pPage->iXCount -= iPixCount;
             //         iPixCount = 0;
-            if (pPage->iLZWOff >= LZW_HIGHWATER)
-                GIFGetMoreData(pPage); // We need to read more LZW data
+//            if (pPage->iLZWOff >= LZW_HIGHWATER)
+//                GIFGetMoreData(pPage); // We need to read more LZW data
             return;
         }
         else  /* Pixels cross into next line */
@@ -1198,6 +1205,8 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             }
             pPage->iYCount--;
             buf = pPage->ucLineBuf;
+            if (pPage->iLZWOff >= LZW_HIGHWATER)
+                GIFGetMoreData(pPage); // We need to read more LZW data
         }
     } /* while */
     if (pPage->iLZWOff >= LZW_HIGHWATER)
@@ -1277,17 +1286,14 @@ init_codetable:
                 {
                     giftabs[nextcode] = oldcode;
                     gifpels[PIXEL_FIRST + nextcode] = gifpels[PIXEL_FIRST + oldcode];
-                    if (giftabs[code] == LINK_UNUSED) /* Old code */
-                        gifpels[PIXEL_LAST + nextcode] = gifpels[PIXEL_FIRST + oldcode];
-                    else
-                        gifpels[PIXEL_LAST + nextcode] = gifpels[PIXEL_FIRST + code];
+                    gifpels[PIXEL_LAST + nextcode] = gifpels[PIXEL_FIRST + code];
                 }
                 nextcode++;
                 if (nextcode >= nextlim && codesize < MAX_CODE_SIZE)
                 {
                     codesize++;
                     nextlim <<= 1;
-                    sMask = (sMask << 1) | 1;
+                    sMask = nextlim - 1;
                 }
             GIFMakePels(pImage, code);
             oldcode = code;

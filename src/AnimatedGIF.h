@@ -51,10 +51,7 @@
 // a 128x32 display will not need a max code size of 12 nor a palette
 // with 256 entries
 //
-#define SYM_OFFSETS 0x0000
-#define SYM_LENGTHS 0x1000
-#define SYM_EXTRAS  0x2000
-#define TURBO_BUFFER_SIZE (0x3000 * sizeof(uint32_t))
+#define TURBO_BUFFER_SIZE 0x6100
 #define MAX_CODE_SIZE 12
 #define MAX_COLORS 256
 #ifdef __LINUX__
