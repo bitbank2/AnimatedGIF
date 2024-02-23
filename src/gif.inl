@@ -776,7 +776,7 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                     d++;
                 }
             }
-        } else { // convert all pixels through the palette
+        } else { // convert all pixels through the palette without transparency
 #if REGISTER_WIDTH == 64
             // parallelize the writes
             // optimizing for the write buffer helps; reading 4 bytes at a time vs 1 doesn't on M1
@@ -1025,18 +1025,18 @@ init_codetable:
         }
         if (code != eoi) {
             if (nextcode < nextlim) { // for deferred cc case, don't let it overwrite the last entry (fff)
-                if (code == nextcode) { // new code
+                if (code != nextcode) { // most probable case
+                    iLen = LZWCopyBytes(buf, iOffset, &pSymbols[code], &pLengths[code]);
+                    pSymbols[nextcode] = (pSymbols[oldcode] | 0x800000 | (buf[iOffset] << 24));
+                    pLengths[nextcode] = pLengths[oldcode];
+                    iOffset += iLen;
+                } else { // new code
                     iLen = LZWCopyBytes(buf, iOffset, &pSymbols[oldcode], &pLengths[oldcode]);
                     pLengths[nextcode] = iLen+1;
                     pSymbols[nextcode] = iOffset;
                     c = buf[iOffset];
                     iOffset += iLen;
                     buf[iOffset++] = c; // repeat first character of old code on the end
-                } else { // existing code
-                    iLen = LZWCopyBytes(buf, iOffset, &pSymbols[code], &pLengths[code]);
-                    pSymbols[nextcode] = (pSymbols[oldcode] | 0x800000 | (buf[iOffset] << 24));
-                    pLengths[nextcode] = pLengths[oldcode];
-                    iOffset += iLen;
                 }
             } else { // Deferred CC case - continue to use codes, but don't generate new ones
                 iLen = LZWCopyBytes(buf, iOffset, &pSymbols[code], &pLengths[code]);
@@ -1089,12 +1089,13 @@ init_codetable:
             gd.ucBackground = pImage->ucBackground;
             if (pImage->pFrameBuffer) { // the user provided another frame buffer for the de-palettized pixels
                 DrawCooked(pImage, &gd, &pImage->pFrameBuffer[(pImage->iX + (gd.y + pImage->iY) * pImage->iCanvasWidth) * sizeof(uint16_t)]);
-            } else { // no framebuffer means the user wants a callback for every line
+                gd.pPixels = &pImage->pFrameBuffer[(pImage->iX + (gd.y + pImage->iY) * pImage->iCanvasWidth) * sizeof(uint16_t)];
+            } else { // no framebuffer means the user must provide a callback for every line
                 DrawCooked(pImage, &gd, &buf[pImage->iCanvasHeight * pImage->iCanvasWidth]);
                 gd.pPixels = &buf[pImage->iCanvasHeight * pImage->iCanvasWidth]; // point to the line we just converted
-                if (pImage->pfnDraw) {
-                    (*pImage->pfnDraw)(&gd); // callback to handle this line
-                }
+            }
+            if (pImage->pfnDraw) {
+                (*pImage->pfnDraw)(&gd); // callback to handle this line
             }
         }
     }
@@ -1196,6 +1197,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
                     gd.pPixels = &pPage->pFrameBuffer[pPage->iCanvasWidth * pPage->iCanvasHeight];
                 } else if (pPage->ucDrawType == GIF_DRAW_FULLFRAME) {
                     DrawCooked(pPage, &gd, &pPage->pFrameBuffer[(pPage->iX + (pPage->iCanvasWidth * (pPage->iY + gd.y)) * sizeof(uint16_t))]);
+                    gd.pPixels = &pPage->pFrameBuffer[(pPage->iX + (pPage->iCanvasWidth * (pPage->iY + gd.y)) * sizeof(uint16_t))];
                 } else { // the user will manage converting them through the palette
                     DrawNewPixels(pPage, &gd);
                 }
@@ -1229,7 +1231,7 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     unsigned short oldcode, codesize, nextcode, nextlim;
     unsigned short *giftabs, cc, eoi;
     signed short sMask;
-    unsigned char *gifpels, *p;
+    unsigned char c, *gifpels, *p;
     //    int iStripSize;
     //unsigned char **index;
     BIGUINT ulBits;
@@ -1272,7 +1274,7 @@ init_codetable:
     {
       GET_CODE
     }
-    oldcode = code;
+    c = oldcode = code;
     GIFMakePels(pImage, code); // first code is output as the first pixel
     // Main decode loop
     while (code != eoi && pImage->iYCount > 0) // && y < pImage->iHeight+1) /* Loop through all lines of the image (or strip) */
@@ -1285,8 +1287,8 @@ init_codetable:
                 if (nextcode < nextlim) // for deferred cc case, don't let it overwrite the last entry (fff)
                 {
                     giftabs[nextcode] = oldcode;
-                    gifpels[PIXEL_FIRST + nextcode] = gifpels[PIXEL_FIRST + oldcode];
-                    gifpels[PIXEL_LAST + nextcode] = gifpels[PIXEL_FIRST + code];
+                    gifpels[PIXEL_FIRST + nextcode] = c; // oldcode pixel value
+                    gifpels[PIXEL_LAST + nextcode] = c = gifpels[PIXEL_FIRST + code];
                 }
                 nextcode++;
                 if (nextcode >= nextlim && codesize < MAX_CODE_SIZE)
