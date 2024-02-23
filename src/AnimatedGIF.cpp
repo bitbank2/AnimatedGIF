@@ -85,6 +85,13 @@ int AnimatedGIF::allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
     return GIF_INVALID_PARAMETER;
 } /* allocFrameBuf() */
 //
+// Set the frame buffer pointer
+//
+void AnimatedGIF::setFrameBuf(void *pFrameBuf)
+{
+    _gif.pFrameBuffer = (uint8_t*)pFrameBuf;
+}
+//
 // Set the Turbo buffer pointer
 //
 void AnimatedGIF::setTurboBuf(void *pBuf)
@@ -97,7 +104,7 @@ void AnimatedGIF::setTurboBuf(void *pBuf)
 //
 int AnimatedGIF::setDrawType(int iType)
 {
-    if (iType != GIF_DRAW_RAW && iType != GIF_DRAW_COOKED)
+    if (iType != GIF_DRAW_RAW && iType != GIF_DRAW_COOKED && iType != GIF_DRAW_FULLFRAME)
         return GIF_INVALID_PARAMETER; // invalid drawing mode
     _gif.ucDrawType = (uint8_t)iType;
     return GIF_SUCCESS;
