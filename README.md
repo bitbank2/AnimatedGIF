@@ -12,17 +12,22 @@ larry@bitbanksoftware.com<br>
 I started working with image and video files around 1989 and soon turned my interest into a Document Imaging product based on my own imaging library. Over the years I added support for more and more formats until I had supported all of the standard ones, including DICOM. I sold my Document Imaging business in 1997, but still found uses for my imaging code in other projects such as retro gaming. I recently went looking to see if there was a good GIF player for Arduino and only found Adafruit's library. Unfortunately it only runs on their ATSAMD51 boards. I thought it would be possible to use my old code to create a universal GIF player that could run on any MCU/SoC with at least 24K of RAM, so I started modifying my old GIF code for this purpose. The latest focus of this project is both raw code speed and features that allow it to run well on microcontrollers (e.g. to use as little RAM as possible, and include optimized support for SPI LCDs).
 
 *** NEW ***
-The latest version brings much more speed to all modes of operation as well as a new way to decode which trades more memory for more speed.
-
-Limitations
 -----------
+The latest version brings much more speed to all modes of operation as well as a new way to decode (Turbo mode) which trades more memory for more speed. I took another look at the decoder and found some creative ways of speeding it up. I also wrote a new decode mode (Turbo) which uses the output image as the dictionary. It needs another 24K of RAM and can accelerate the decoding by 2-30x depending on the target system and image. I also added support for 32-bpp output and the GIFDraw callback is now optional.
 
-To save memory, the code limits the maximum image width to 320 pixels. This is just a constant defined in AnimatedGIF.h, so you can set it larger if you like. Animated GIF images have a lot of options to save space when encoding the changes from frame to frame. Many of the tools which generate animated GIFs don't make use of every option and that's helpful because the frame disposal options are not supported in the library code. They can be implemented in your drawing callback if you want. The reason they're not provided with this code is because one of the image disposal options requires you to keep an entire copy of the previous frame and this would prevent it from working on low memory MCUs. If would also require dynamic memory allocation which is another area I avoided with this code.
+MCU Accomodations
+-----------------
+
+The original idea of this project was to bring efficient GIF decoding to MCUs with insufficient memory to hold the entire framebuffer. It grew to include design features meant to accelerate SPI LCD output. The premise is that for most iamges, each line can be decoded and sent to the display (hopefully using DMA) while the next line is being decoded. This allows the SPI transmit time to essentially vanish and greatly reduces the amount of memory required. Not all images behave well with this arrangement - certain disposal options will not render correctly and images with lots of alternating transparent/opaque pixels will slow down the SPI output due to the mode switching. The other goal was to not dynamically allocate and free memory; all buffers are managed outside of the library. This allows the code to compile as C99 with no external dependencies beyond the basic clib/string functions.
+
+It's Easy Until It's Not
+------------------------
+Please look through the example code and WiKi for info on how best to get things working for your specific setup. If you have lots of spare memory, the code can do a lot of the work for you, but if your system is more constrained it can take more effort to get all of the pieces working well together. The biggest challenge is usually the GIFDraw callback function. It sends you 1 line of output at a time, but also includes extra info to help with SPI displays. There are a variety of example sketches for Arduino and Linux to help show you how it all works.
 
 Designed for Speed
 ------------------
 
-My work is always focused on code optimization, so this project is no different. I've profiled this code and optimized it for 32-bit CPUs. I discovered while testing it that seeking on micro SD cards (on Arduino) is very very slow. I had to use a little extra RAM to buffer incoming data to avoid seeking. The code does need to seek, but it's done very rarely. I also wrote code to buffer and de-chunk some of the incoming LZW data to avoid checking for chunk boundaries in the inner decode loop. There are a number of clever optimizations that should allow this to run faster than any existing GIF solutions on Arduino boards. The speed gained from my decoder will be lost if it takes too long to display the pixels. For this reason, the GIFDRAW callback passes an RGB565 palette in the byte order of your choosing and the example sketches uses functions to write entire lines of pixels to the SPI TFT displays in a single shot. If you implement your own GIFDRAW callback and have to pass 1 pixel at a time to whatever display device you're using, this will cause a major slowdown in the display of the frames.
+Beyond the MCU accomodations, this code can be used on PC class devices and will perform far better than libgif. The performance optimizations I made help on both MCU class devices and x86/Arm/RISC-V Linex/PC devices. I've been working on this code long enough to have tried nearly every trick in my toolbox. The code is about as fast as it can be in C, without cutting corners for malformed images nor resorting to CPU-specific optimizations or assembly language.
 
 <p align="center">
   <img width="600" height="200" src="perf.png">
@@ -40,8 +45,9 @@ Features:
 - GIF image data can come from memory (FLASH/RAM), SDCard or any media you provide.
 - GIF files can be any length, (e.g. hundreds of megabytes)
 - Simple C++ class and callback design allows you to easily add GIF support to any application.
-- The C code doing the heavy lifting is completely portable and has no external dependencies.
+- The C99 code doing the heavy lifting is completely portable and has no external dependencies.
 - Does not use dynamic memory (malloc/free/new/delete), so it's easy to build it for a minimal bare metal system.
+- Super fast on desktop PCs too (or anything with enough RAM)
 
 Acquiring GIF files to play:
 ----------------------------
