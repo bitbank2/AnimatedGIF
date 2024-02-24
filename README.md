@@ -1,7 +1,7 @@
 AnimatedGIF
 ===========
 
-Copyright (c) 2020 BitBank Software, Inc.<br>
+Copyright (c) 2020-2024 BitBank Software, Inc.<br>
 Written by Larry Bank<br>
 larry@bitbanksoftware.com<br>
 
@@ -9,7 +9,10 @@ larry@bitbanksoftware.com<br>
 
 ![AnimatedGIF](/demo.jpg?raw=true "AnimatedGIF")
 
-I started working with image and video files around 1989 and soon turned my interest into a Document Imaging product based on my own imaging library. Over the years I added support for more and more formats until I had supported all of the standard ones, including DICOM. I sold my Document Imaging business in 1997, but still found uses for my imaging code in other projects such as retro gaming. I recently went looking to see if there was a good GIF player for Arduino and only found Adafruit's library. Unfortunately it only runs on their ATSAMD51 boards. I thought it would be possible to use my old code to create a universal GIF player that could run on any MCU/SoC with at least 24K of RAM, so I started modifying my old GIF code for this purpose. The focus of this project is speed and to use as little RAM as possible, so there are some limitations.
+I started working with image and video files around 1989 and soon turned my interest into a Document Imaging product based on my own imaging library. Over the years I added support for more and more formats until I had supported all of the standard ones, including DICOM. I sold my Document Imaging business in 1997, but still found uses for my imaging code in other projects such as retro gaming. I recently went looking to see if there was a good GIF player for Arduino and only found Adafruit's library. Unfortunately it only runs on their ATSAMD51 boards. I thought it would be possible to use my old code to create a universal GIF player that could run on any MCU/SoC with at least 24K of RAM, so I started modifying my old GIF code for this purpose. The latest focus of this project is both raw code speed and features that allow it to run well on microcontrollers (e.g. to use as little RAM as possible, and include optimized support for SPI LCDs).
+
+*** NEW ***
+The latest version brings much more speed to all modes of operation as well as a new way to decode which trades more memory for more speed.
 
 Limitations
 -----------
