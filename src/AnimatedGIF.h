@@ -75,25 +75,33 @@
 #define LZW_BUF_SIZE_TURBO (LZW_BUF_SIZE + (2<<MAX_CODE_SIZE) + (PIXEL_LAST*2) + MAX_WIDTH)
 #define LZW_HIGHWATER_TURBO ((LZW_BUF_SIZE_TURBO * 15) / 16)
 
+//
+// Pixel types
+//
 enum {
    GIF_PALETTE_RGB565_LE = 0, // little endian (default)
    GIF_PALETTE_RGB565_BE,     // big endian
    GIF_PALETTE_RGB888,        // original 24-bpp entries
-   GIF_PALETTE_RGB8888,       // Useful for 32-bit 'cooked' output
+   GIF_PALETTE_RGB8888,       // 32-bit (alpha = 0xff)
 };
 // for compatibility with older code
 #define LITTLE_ENDIAN_PIXELS GIF_PALETTE_RGB565_LE
 #define BIG_ENDIAN_PIXELS GIF_PALETTE_RGB565_BE
 //
-// Draw callback pixel type
-// RAW = 8-bit palettized pixels requiring transparent pixel handling
-// COOKED = 16 or 24-bpp fully rendered pixels ready for display
-// FULLFRAME = 16 or 24-bpp entire frame rendered with no callback
+// Draw types
+//
+// RAW = 8-bit palettized pixels requiring transparent pixel handling and conversion through the palette.
+//       Each line is sent to the GIFDraw callback as 8-bit pixels. If a framebuffer exists, the lines will be
+//       written there too. The GIFDraw callback is optional if there is a framebuffer allocated.
+//
+// COOKED = 16/24/32-bpp fully rendered pixels ready for display. This requires a full frame buffer with extra
+//          room for the fully rendered pixels at the end of the 8-bit pixel buffer. For example, a 160x120
+//          canvas size with 24-bit output would require (160*120 + 3*160) bytes.
+//          Each prepared line is sent to the GIFDraw callback as a row of 16/24/32-bit pixels.
 //
 enum {
    GIF_DRAW_RAW = 0,
-   GIF_DRAW_COOKED,
-   GIF_DRAW_FULLFRAME
+   GIF_DRAW_COOKED
 };
 
 enum {
@@ -130,6 +138,7 @@ typedef struct gif_draw_tag
     int iX, iY; // Corner offset of this frame on the canvas
     int y; // current line being drawn (0 = top line of image)
     int iWidth, iHeight; // size of this frame
+    int iCanvasWidth; // need this to know where to place output in a fully cooked bitmap
     void *pUser; // user supplied pointer
     uint8_t *pPixels; // 8-bit source pixels for this line
     uint16_t *pPalette; // little or big-endian RGB565 palette entries (default)
@@ -154,13 +163,13 @@ typedef void (GIF_FREE_CALLBACK)(void *buffer);
 //
 typedef struct gif_image_tag
 {
-    int iWidth, iHeight, iCanvasWidth, iCanvasHeight;
-    int iX, iY; // GIF corner offset
-    int iBpp;
-    int iError; // last error
-    int iFrameDelay; // delay in milliseconds for this frame
-    int iRepeatCount; // NETSCAPE animation repeat count. 0=forever
-    int iXCount, iYCount; // decoding position in image (countdown values)
+    uint16_t iWidth, iHeight, iCanvasWidth, iCanvasHeight;
+    uint16_t iX, iY; // GIF corner offset
+    uint16_t iBpp;
+    int16_t iError; // last error
+    uint16_t iFrameDelay; // delay in milliseconds for this frame
+    uint16_t iRepeatCount; // NETSCAPE animation repeat count. 0=forever
+    uint16_t iXCount, iYCount; // decoding position in image (countdown values)
     int iLZWOff; // current LZW data offset
     int iLZWSize; // current quantity of data in the LZW buffer
     int iCommentPos; // file offset of start of comment data

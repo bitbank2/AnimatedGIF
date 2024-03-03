@@ -67,7 +67,7 @@ int32_t iOldPos;
     return (int)_gif.sCommentLen;
 } /* getComment() */
 
-//
+//  
 // Allocate a block of memory to hold the entire canvas (as 8-bpp)
 //
 int AnimatedGIF::allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
@@ -84,6 +84,24 @@ int AnimatedGIF::allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
     }
     return GIF_INVALID_PARAMETER;
 } /* allocFrameBuf() */
+//
+// Allocate a block of memory to hold the Turbo Buffer entire canvas (as 8-bpp)
+// as well as 32k needed for faster decoding
+//
+int AnimatedGIF::allocTurboBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
+{
+    if (_gif.iCanvasWidth > 0 && _gif.iCanvasHeight > 0 && _gif.pTurboBuffer == NULL)
+    {
+        // Allocate a little extra space for the current line
+        // as RGB565 or RGB888
+        int iTurboSize = TURBO_BUFFER_SIZE + (_gif.iCanvasWidth * _gif.iCanvasHeight);
+        _gif.pTurboBuffer = (unsigned char *)(*pfnAlloc)(iTurboSize);
+        if (_gif.pTurboBuffer == NULL)
+            return GIF_ERROR_MEMORY;
+        return GIF_SUCCESS;
+    }
+    return GIF_INVALID_PARAMETER;
+} /* allocTurboBuf() */
 //
 // Set the frame buffer pointer
 //
@@ -104,7 +122,7 @@ void AnimatedGIF::setTurboBuf(void *pBuf)
 //
 int AnimatedGIF::setDrawType(int iType)
 {
-    if (iType != GIF_DRAW_RAW && iType != GIF_DRAW_COOKED && iType != GIF_DRAW_FULLFRAME)
+    if (iType != GIF_DRAW_RAW && iType != GIF_DRAW_COOKED)
         return GIF_INVALID_PARAMETER; // invalid drawing mode
     _gif.ucDrawType = (uint8_t)iType;
     return GIF_SUCCESS;
