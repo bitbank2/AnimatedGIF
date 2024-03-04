@@ -13,7 +13,7 @@ I started working with image and video files around 1989 and soon turned my inte
 
 *** NEW ***
 -----------
-The latest version brings much more speed to all modes of operation as well as a new way to decode (Turbo mode) which trades more memory for more speed. I took another look at the decoder and found some creative ways of speeding it up. I also wrote a new decode mode (Turbo) which uses the output image as the dictionary. It needs another 24K of RAM and can accelerate the decoding by 2-30x depending on the target system and image. I also added support for 32-bpp output and the GIFDraw callback is now optional.
+The latest version brings much more speed to all modes of operation as well as a new way to decode (Turbo mode) which trades more memory for more speed. I took another look at the decoder and found some creative ways of speeding it up. I also wrote a new decode mode (Turbo) which uses the output image as the dictionary. It needs another 32K of RAM and can accelerate the decoding by 2-30x depending on the target system and image. I also added support for 32-bpp output and the GIFDraw callback is now optional. There is also the option to request "COOKED" output which means that the library will handle merging new frames onto the canvas and your GIFDraw callback gets pixels ready to for display.
 
 MCU Accomodations
 -----------------

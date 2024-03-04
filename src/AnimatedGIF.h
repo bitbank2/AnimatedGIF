@@ -40,7 +40,7 @@
 //
 // ** NEW **
 // Turbo mode added Feb 18, 2024. This option decodes images
-// up to 30x faster if there is enough RAM (48K + full framebuffer)
+// up to 30x faster if there is enough RAM (32K + full framebuffer)
 //
 
 /* GIF Defines and variables */
