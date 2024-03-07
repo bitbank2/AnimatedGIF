@@ -40,7 +40,7 @@
 //
 // ** NEW **
 // Turbo mode added Feb 18, 2024. This option decodes images
-// up to 30x faster if there is enough RAM (32K + full framebuffer)
+// up to 30x faster if there is enough RAM (48K + full framebuffer)
 //
 
 /* GIF Defines and variables */
@@ -83,6 +83,8 @@ enum {
    GIF_PALETTE_RGB565_BE,     // big endian
    GIF_PALETTE_RGB888,        // original 24-bpp entries
    GIF_PALETTE_RGB8888,       // 32-bit (alpha = 0xff)
+   GIF_PALETTE_1BPP,          // 1-bit per pixel (horizontal, MSB on left)
+   GIF_PALETTE_1BPP_OLED      // 1-bit per pixel (vertical, LSB on top)
 };
 // for compatibility with older code
 #define LITTLE_ENDIAN_PIXELS GIF_PALETTE_RGB565_LE

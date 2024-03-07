@@ -309,10 +309,8 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
         { // by default, convert to byte-reversed RGB565 for immediate use
             // Read enough additional data for the color table
             iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], 3*(1<<iColorTableBits));
-            if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE)
-            {
-                for (i=0; i<(1<<iColorTableBits); i++)
-                {
+            if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE) {
+                for (i=0; i<(1<<iColorTableBits); i++) {
                     uint16_t usRGB565;
                     usRGB565 = ((p[iOffset] >> 3) << 11); // R
                     usRGB565 |= ((p[iOffset+1] >> 2) << 5); // G
@@ -323,9 +321,17 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                         pPage->pPalette[i] = __builtin_bswap16(usRGB565); // SPI wants MSB first
                     iOffset += 3;
                 }
-            }
-            else // just copy it as-is (RGB888 & RGB8888 output)
-            {
+            } else if (pPage->ucPaletteType == GIF_PALETTE_1BPP || pPage->ucPaletteType == GIF_PALETTE_1BPP_OLED) {
+                uint8_t *pPal1 = (uint8_t*)pPage->pPalette;
+                for (i=0; i<(1<<iColorTableBits); i++) {
+                    uint16_t usGray;
+                    usGray = p[iOffset]; // R 
+                    usGray += p[iOffset+1]*2; // G is twice as important
+                    usGray += p[iOffset+2]; // B
+                    pPal1[i] = (usGray >= 512); // bright enough = 1
+                    iOffset += 3;
+                }
+            } else { // just copy it as-is (RGB888 & RGB8888 output)
                 memcpy(pPage->pPalette, &p[iOffset], (1<<iColorTableBits) * 3);
                 iOffset += (1 << iColorTableBits) * 3;
             }
@@ -471,9 +477,17 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                     pPage->pLocalPalette[i] = __builtin_bswap16(usRGB565); // SPI wants MSB first
                 iOffset += 3;
             }
-        }
-        else // just copy it as-is
-        {
+        } else if (pPage->ucPaletteType == GIF_PALETTE_1BPP || pPage->ucPaletteType == GIF_PALETTE_1BPP_OLED) {
+            uint8_t *pPal1 = (uint8_t*)pPage->pLocalPalette;
+            for (i=0; i<j; i++) {
+                uint16_t usGray;
+                usGray = p[iOffset]; // R
+                usGray += p[iOffset+1]*2; // G is twice as important
+                usGray += p[iOffset+2]; // B
+                pPal1[i] = (usGray >= 512); // bright enough = 1
+                iOffset += 3;
+            }
+        } else { // just copy it as-is
             memcpy(pPage->pLocalPalette, &p[iOffset], j * 3);
             iOffset += j*3;
         }
@@ -757,7 +771,111 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
     s = pDraw->pPixels; // s points to the newly decoded pixels of this line of the current frame
     pEnd = s + pDraw->iWidth; // faster way to loop over the source pixels - eliminates a counter variable
     
-    if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE) {
+    if (pPage->ucPaletteType == GIF_PALETTE_1BPP || pPage->ucPaletteType == GIF_PALETTE_1BPP_OLED) { // 1-bit mono
+        uint8_t *d = NULL;
+        uint8_t *pPal = (uint8_t*)pDraw->pPalette;
+        uint8_t uc, ucMask;
+         if (pPage->ucPaletteType == GIF_PALETTE_1BPP) { // horizontal pixels
+             // Apply the new pixels to the main image and generate 1-bpp output
+             if (pDraw->ucHasTransparency) { // if transparency used
+                 uint8_t ucTransparent = pDraw->ucTransparent;
+                 if (pDraw->ucDisposalMethod == 2) { // restore to background color
+                     uint8_t u8BG = pPal[pDraw->ucBackground];
+                     if (u8BG == 1) u8BG = 0xff; // set all bits to use mask
+                     uc = 0; ucMask = 0x80;
+                     while (s < pEnd) {
+                         c = *s++;
+                         if (c != ucTransparent) {
+                             if (pPal[c])
+                                uc |= ucMask;
+                             *d8++ = c;
+                         } else {
+                             uc |= (u8BG & ucMask); // transparent pixel is restored to background color
+                             *d8++ = pDraw->ucBackground;
+                         }
+                         ucMask >>= 1;
+                         if (ucMask == 0) { // write the completed byte
+                             *d++ = uc;
+                             uc = 0;
+                             ucMask = 0x80;
+                         }
+                     }
+                     if (ucMask != 0x80) { // write last partial byte
+                         *d = uc;
+                     }
+                 } else { // no disposal, just write non-transparent pixels
+                     while (s < pEnd) {
+                         c = *s++;
+                         if (c != ucTransparent) {
+                             *d++ = pPal[c];
+                             *d8++ = c;
+                         } else {
+                             *d++ = pPal[*d8++];
+                         }
+                     }
+                 }
+             } else { // convert everything as opaque
+                 uc = 0; ucMask = 0x80; // left pixel is MSB
+                 while (s < pEnd) {
+                     c = *d8++ = *s++; // just write the new opaque pixels over the old
+                     if (pPal[c]) // if non-zero, set white pixel
+                        uc |= ucMask;
+                     ucMask >>= 1;
+                     if (ucMask == 0) { // time to write the current byte
+                        *d++ = uc;
+                        uc = 0;
+                        ucMask = 0x80;
+                     }
+                 }
+                 if (ucMask != 0x80) { // write last partial byte
+                     *d = uc;
+                 }
+             }
+         } else { // vertical pixels
+             d = pPage->pFrameBuffer;
+             d += (pPage->iCanvasWidth * pPage->iCanvasHeight);
+             d += pDraw->iX; // starting column
+             d += ((pDraw->iY + pDraw->y)>>3) * pPage->iCanvasWidth;
+             ucMask = 1 << ((pDraw->iY + pDraw->y) & 7);
+             // Apply the new pixels to the main image and generate 1-bpp output
+             if (pDraw->ucHasTransparency) { // if transparency used
+                 uint8_t ucTransparent = pDraw->ucTransparent;
+                 if (pDraw->ucDisposalMethod == 2) { // restore to background color
+                     uint8_t u8BG = pPal[pDraw->ucBackground];
+                     u8BG *= ucMask; // set the right bit
+                     while (s < pEnd) {
+                         c = *s++;
+                         uc = *d & ~ucMask; // clear old pixel
+                         if (c != ucTransparent) {
+                             uc |= (pPal[c] * ucMask);
+                             *d8++ = c;
+                         } else {
+                             uc |= u8BG; // transparent pixel is restored to background color
+                             *d8++ = pDraw->ucBackground;
+                         }
+                         *d++ = uc; // write back the updated pixel
+                     }
+                 } else { // no disposal, just write non-transparent pixels
+                     while (s < pEnd) {
+                         c = *s++;
+                         uc = *d & ~ucMask;
+                         if (c != ucTransparent) {
+                             *d++ = uc | (pPal[c] * ucMask);
+                             *d8++ = c;
+                         } else {
+                             *d++ = uc | (pPal[*d8++] * ucMask);
+                         }
+                     }
+                 }
+             } else { // convert everything as opaque
+                 while (s < pEnd) {
+                     c = *d8++ = *s++; // just write the new opaque pixels over the old
+                     uc = *d & ~ucMask;
+                     *d++ = uc | (pPal[c] * ucMask);
+                 }
+             }
+         }
+    } else if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE) {
         uint16_t *d, *pPal = (uint16_t *)pDraw->pPalette;
         d = (uint16_t *)pDest; // dest pointer to the cooked pixels
         // Apply the new pixels to the main image
