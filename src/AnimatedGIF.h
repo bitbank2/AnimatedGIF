@@ -57,7 +57,7 @@
 #ifdef __LINUX__
 #define MAX_WIDTH 2048
 #else
-#define MAX_WIDTH 320
+#define MAX_WIDTH 480
 #endif // __LINUX__
 #define LZW_BUF_SIZE (6*MAX_CHUNK_SIZE)
 #define LZW_HIGHWATER (4*MAX_CHUNK_SIZE)
@@ -73,7 +73,7 @@
 #define MAX_HASH 5003
 // expanded LZW buffer for Turbo mode
 #define LZW_BUF_SIZE_TURBO (LZW_BUF_SIZE + (2<<MAX_CODE_SIZE) + (PIXEL_LAST*2) + MAX_WIDTH)
-#define LZW_HIGHWATER_TURBO ((LZW_BUF_SIZE_TURBO * 15) / 16)
+#define LZW_HIGHWATER_TURBO ((LZW_BUF_SIZE_TURBO * 14) / 16)
 
 //
 // Pixel types
@@ -212,8 +212,8 @@ class AnimatedGIF
     int open(const char *szFilename, GIF_OPEN_CALLBACK *pfnOpen, GIF_CLOSE_CALLBACK *pfnClose, GIF_READ_CALLBACK *pfnRead, GIF_SEEK_CALLBACK *pfnSeek, GIF_DRAW_CALLBACK *pfnDraw);
     void close();
     void reset();
-    void begin(unsigned char ucPaletteType = GIF_PALETTE_RGB565_LE);
-    void begin(int iEndian, unsigned char ucPaletteType) { begin(ucPaletteType); };
+    void begin(uint8_t ucPaletteType = GIF_PALETTE_RGB565_LE);
+    void begin(int iEndian, uint8_t ucPaletteType) { begin(ucPaletteType); };
     int playFrame(bool bSync, int *delayMilliseconds, void *pUser = NULL);
     int getCanvasWidth();
     int allocTurboBuf(GIF_ALLOC_CALLBACK *pfnAlloc);
@@ -250,7 +250,7 @@ class AnimatedGIF
     int GIF_getLoopCount(GIFIMAGE *pGIF);
 #endif // __cplusplus
 
-#if (INTPTR_MAX == INT64_MAX)
+#if (INTPTR_MAX != INT64_MAX)
 #define ALLOWS_UNALIGNED
 #define INTELSHORT(p) (*(uint16_t *)p)
 #define INTELLONG(p) (*(uint64_t *)p)
