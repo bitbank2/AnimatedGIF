@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
 #include "bb_spi_lcd.h"
 #include "../src/AnimatedGIF.h"
 #include "../src/gif.inl"
@@ -38,6 +39,17 @@ SPILCD lcd;
 GIFIMAGE gif;
 uint8_t *pStart;
 
+int MilliTime()
+{
+int iTime;
+struct timespec res;
+
+    clock_gettime(CLOCK_MONOTONIC, &res);
+    iTime = 1000*res.tv_sec + res.tv_nsec/1000000;
+
+    return iTime;
+} /* MilliTime() */
+
 void GIFDraw(GIFDRAW *pDraw)
 {
 uint8_t *d;
@@ -47,30 +59,40 @@ uint8_t *d;
 
 int main(int argc, char *argv[])
 {
-int i, iFrame;
+int i, iFrame, iTime;
 int w, h;
 
 // int spilcdInit(int iLCDType, int bFlipRGB, int bInvert, int bFlipped, int32_t iSPIFreq, int iCSPin, int iDCPin, int iResetPin, int iLEDPin, int iMISOPin, int iMOSIPin, int iCLKPin);
-	i = spilcdInit(&lcd, LCD_TYPE, FLAGS_NONE, 62500000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, -1,-1,-1,1);
+	i = spilcdInit(&lcd, LCD_TYPE, FLAGS_NONE, 98000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, -1,-1,-1,1);
 	if (i == 0)
 	{
 		spilcdSetOrientation(&lcd, LCD_ORIENTATION_90);
 		spilcdFill(&lcd, 0, DRAW_TO_LCD);
 		GIF_begin(&gif, BIG_ENDIAN_PIXELS);
 		i = GIF_openFile(&gif, argv[1], GIFDraw);
-		while (i) {
+		if (i) {
 			w = gif.iCanvasWidth;
 			h = gif.iCanvasHeight;
 			printf("GIF opened; w=%d, h=%d\n", w, h);
 			gif.pFrameBuffer = (uint8_t*)malloc(w * h * 3);
                         pStart = &gif.pFrameBuffer[w*h];
 			gif.ucDrawType = GIF_DRAW_COOKED;
-                        iFrame = 0;
+			gif.pTurboBuffer = (uint8_t*)malloc(TURBO_BUFFER_SIZE + (w*h));
+			while (1) {
+				iFrame = 0;
+				iTime = MilliTime();
 			while (GIF_playFrame(&gif, NULL, NULL)) {
 				spilcdSetPosition(&lcd, gif.iX,gif.iY,gif.iWidth,gif.iHeight, DRAW_TO_LCD);
+				i = MilliTime();
 				spilcdWriteDataBlock(&lcd, pStart, gif.iWidth * gif.iHeight * 2, DRAW_TO_LCD);
+				i = MilliTime() - i;
+				printf("WriteDataBlock time = %dms\n", i);
+				iFrame++;
 			}
+			iTime = MilliTime() - iTime;
+			printf("%d frames in %d ms\n", iFrame, iTime);
 			GIF_reset(&gif); // repeat
+			} // while (1)
 		}
 	}
 	else
