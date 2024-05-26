@@ -68,6 +68,7 @@ int w, h;
 	{
 		spilcdSetOrientation(&lcd, LCD_ORIENTATION_90);
 		spilcdFill(&lcd, 0, DRAW_TO_LCD);
+		memset(&gif, 0, sizeof(gif));
 		GIF_begin(&gif, BIG_ENDIAN_PIXELS);
 		i = GIF_openFile(&gif, argv[1], GIFDraw);
 		if (i) {
@@ -77,16 +78,16 @@ int w, h;
 			gif.pFrameBuffer = (uint8_t*)malloc(w * h * 3);
                         pStart = &gif.pFrameBuffer[w*h];
 			gif.ucDrawType = GIF_DRAW_COOKED;
-			gif.pTurboBuffer = (uint8_t*)malloc(TURBO_BUFFER_SIZE + (w*h));
+			//gif.pTurboBuffer = (uint8_t*)malloc(TURBO_BUFFER_SIZE + (w*h));
 			while (1) {
 				iFrame = 0;
 				iTime = MilliTime();
 			while (GIF_playFrame(&gif, NULL, NULL)) {
-				spilcdSetPosition(&lcd, gif.iX,gif.iY,gif.iWidth,gif.iHeight, DRAW_TO_LCD);
-				i = MilliTime();
-				spilcdWriteDataBlock(&lcd, pStart, gif.iWidth * gif.iHeight * 2, DRAW_TO_LCD);
-				i = MilliTime() - i;
-				printf("WriteDataBlock time = %dms\n", i);
+	//			spilcdSetPosition(&lcd, gif.iX,gif.iY,gif.iWidth,gif.iHeight, DRAW_TO_LCD);
+	//			i = MilliTime();
+	//			spilcdWriteDataBlock(&lcd, pStart, gif.iWidth * gif.iHeight * 2, DRAW_TO_LCD);
+	//			i = MilliTime() - i;
+	//			printf("WriteDataBlock time = %dms\n", i);
 				iFrame++;
 			}
 			iTime = MilliTime() - iTime;

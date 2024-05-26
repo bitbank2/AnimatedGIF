@@ -250,7 +250,7 @@ class AnimatedGIF
     int GIF_getLoopCount(GIFIMAGE *pGIF);
 #endif // __cplusplus
 
-#if (INTPTR_MAX != INT64_MAX)
+#if (INTPTR_MAX == INT64_MAX)
 #define ALLOWS_UNALIGNED
 #define INTELSHORT(p) (*(uint16_t *)p)
 #define INTELLONG(p) (*(uint64_t *)p)
