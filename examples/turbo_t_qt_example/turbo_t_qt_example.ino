@@ -8,6 +8,7 @@
 #include "../test_images/earth_128x128.h"
 
 uint8_t *pTurboBuffer;
+uint8_t *pFrameBuffer;
 
 AnimatedGIF gif;
 BB_SPI_LCD lcd;
@@ -51,7 +52,7 @@ void loop() {
 // Allocate a buffer to enable Turbo decoding mode (~50% faster)
 // it requires enough space for the full "raw" canvas plus about 32K workspace for the decoder
   pTurboBuffer = (uint8_t *)heap_caps_malloc(TURBO_BUFFER_SIZE + (128*128), MALLOC_CAP_8BIT);
-
+  pFrameBuffer = (uint8_t *)heap_caps_malloc(128*128*sizeof(uint16_t), MALLOC_CAP_8BIT); // this is for the full frame RGB565 pixels
   while (1) { // loop forever
      // The GIFDraw callback is optional if you use Turbo mode (pass NULL to disable it). You can either
      // manage the transparent pixels + palette conversion yourself or provide a framebuffer for the 'cooked'
@@ -59,6 +60,7 @@ void loop() {
       if (gif.open((uint8_t *)GIF_NAME, sizeof(GIF_NAME), GIFDraw)) {
       Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
       gif.setDrawType(GIF_DRAW_COOKED); // We want the library to generate ready-made pixels
+      gif.setFrameBuf(pFrameBuffer); // for Turbo+cooked, we need to supply a full sized output framebuffer
       gif.setTurboBuf(pTurboBuffer); // Set this before calling playFrame()
       iOffX = (lcd.width() - gif.getCanvasWidth())/2; // center on the display
       iOffY = (lcd.height() - gif.getCanvasHeight())/2;
