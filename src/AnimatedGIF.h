@@ -170,7 +170,7 @@ typedef struct gif_image_tag
     uint16_t iBpp;
     int16_t iError; // last error
     uint16_t iFrameDelay; // delay in milliseconds for this frame
-    uint16_t iRepeatCount; // NETSCAPE animation repeat count. 0=forever
+    int16_t iRepeatCount; // NETSCAPE animation repeat count. 0=forever
     uint16_t iXCount, iYCount; // decoding position in image (countdown values)
     int iLZWOff; // current LZW data offset
     int iLZWSize; // current quantity of data in the LZW buffer
