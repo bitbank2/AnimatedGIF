@@ -277,7 +277,7 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
     pPage->bEndOfFrame = 0; // we're just getting started
     pPage->iFrameDelay = 0; // may not have a gfx extension block
     pPage->iRepeatCount = -1; // assume NETSCAPE loop count is not specified
-    iReadSize = (bInfoOnly) ? 12 : MAX_CHUNK_SIZE;
+    iReadSize = MAX_CHUNK_SIZE;
     // If you try to read past the EOF, the SD lib will return garbage data
     if (iStartPos + iReadSize > pPage->GIFFile.iSize)
        iReadSize = (pPage->GIFFile.iSize - iStartPos - 1);
@@ -299,8 +299,6 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
         pPage->iCanvasWidth = pPage->iWidth = INTELSHORT(&p[6]);
         pPage->iCanvasHeight = pPage->iHeight = INTELSHORT(&p[8]);
         pPage->iBpp = ((p[10] & 0x70) >> 4) + 1;
-        if (bInfoOnly)
-           return 1; // we've got the info we needed, leave
         iColorTableBits = (p[10] & 7) + 1; // Log2(size) of the color table
         pPage->ucBackground = p[11]; // background color
         pPage->ucGIFBits = 0;
@@ -436,6 +434,8 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
             return 0;
         }
     } /* while */
+    if (bInfoOnly)
+       return 1; // we've got the info we needed, leave
     if (p[iOffset] == ';') { // end of file, quit and return a correct error code
         pPage->iError = GIF_EMPTY_FRAME;
         return 1;
