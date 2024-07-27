@@ -1210,6 +1210,7 @@ init_codetable:
         gd.pPalette = (pImage->bUseLocalPalette) ? pImage->pLocalPalette : pImage->pPalette;
         gd.pPalette24 = (uint8_t *)gd.pPalette; // just cast the pointer for RGB888
         gd.ucIsGlobalPalette = pImage->bUseLocalPalette==1?0:1;
+        gd.pUser = pImage->pUser;
 
         for (int y=0; y<pImage->iHeight; y++) {
             gd.y = y;
