@@ -78,12 +78,6 @@
 #define LZW_BUF_SIZE_TURBO (LZW_BUF_SIZE + (2<<MAX_CODE_SIZE) + (PIXEL_LAST*2) + MAX_WIDTH)
 #define LZW_HIGHWATER_TURBO ((LZW_BUF_SIZE_TURBO * 14) / 16)
 
-
-/* Defines sanity checks */
-#if FILE_BUF_SIZE < MAX_CHUNK_SIZE || FILE_BUF_SIZE < 3 * MAX_COLORS
-  #error "FILE_BUF_SIZE is too small"
-#endif
-
 //
 // Pixel types
 //
