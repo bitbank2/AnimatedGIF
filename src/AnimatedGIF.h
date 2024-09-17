@@ -55,11 +55,6 @@
   #endif // __LINUX__
 #endif
 
-/* FILE_BUF_SIZE defines how many bytes are read at once when parsing GIF info and meta data */
-#ifndef FILE_BUF_SIZE
-  #define FILE_BUF_SIZE 4096
-#endif
-
 
 // ======= Expert options =======
 #define MAX_CHUNK_SIZE 255
@@ -69,6 +64,10 @@
 
 #define LZW_BUF_SIZE (6*MAX_CHUNK_SIZE)
 #define LZW_HIGHWATER (4*MAX_CHUNK_SIZE)
+// This buffer is used to store the pixel sequence in reverse order
+// it needs to be large enough to hold the longest possible
+// sequence (1<<MAX_CODE_SIZE)
+#define FILE_BUF_SIZE (1<<MAX_CODE_SIZE)
 
 #define PIXEL_FIRST 0
 #define PIXEL_LAST (1<<MAX_CODE_SIZE)
@@ -200,7 +199,7 @@ typedef struct gif_image_tag
     unsigned char *pFrameBuffer;
     unsigned char *pTurboBuffer;
     unsigned char *pPixels, *pOldPixels;
-    unsigned char ucFileBuf[FILE_BUF_SIZE]; // used for reading GIF information and meta data
+    unsigned char ucFileBuf[FILE_BUF_SIZE]; // used for reading GIF information and holds temp data and pixel stack
     unsigned short pPalette[(MAX_COLORS * 3)/2]; // can hold RGB565 or RGB888 or 1BPP - set in begin()
     unsigned short pLocalPalette[(MAX_COLORS * 3)/2]; // color palettes for GIF images
     unsigned char ucLZW[LZW_BUF_SIZE]; // holds de-chunked LZW data
