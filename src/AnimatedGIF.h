@@ -44,27 +44,31 @@
 //
 
 /* GIF Defines and variables */
+
+// ======= Simple options =======
+/* MAX_WIDTH should be set to the maximum supported width (e.g. display pixel width) */
+#ifndef MAX_WIDTH
+  #ifdef __LINUX__
+    #define MAX_WIDTH 2048
+  #else
+    #define MAX_WIDTH 480
+  #endif // __LINUX__
+#endif
+
+/* FILE_BUF_SIZE defines how many bytes are read at once when parsing GIF info and meta data */
+#ifndef FILE_BUF_SIZE
+  #define FILE_BUF_SIZE 4096
+#endif
+
+
+// ======= Expert options =======
 #define MAX_CHUNK_SIZE 255
-//
-// These 2 macros can be changed to limit the amount of RAM
-// required by the decoder. For example, decoding 1-bit images to
-// a 128x32 display will not need a max code size of 12 nor a palette
-// with 256 entries
-//
 #define TURBO_BUFFER_SIZE 0x6100
 #define MAX_CODE_SIZE 12
 #define MAX_COLORS 256
-#ifdef __LINUX__
-#define MAX_WIDTH 2048
-#else
-#define MAX_WIDTH 480
-#endif // __LINUX__
+
 #define LZW_BUF_SIZE (6*MAX_CHUNK_SIZE)
 #define LZW_HIGHWATER (4*MAX_CHUNK_SIZE)
-// This buffer is used to store the pixel sequence in reverse order
-// it needs to be large enough to hold the longest possible
-// sequence (1<<MAX_CODE_SIZE)
-#define FILE_BUF_SIZE (1<<MAX_CODE_SIZE)
 
 #define PIXEL_FIRST 0
 #define PIXEL_LAST (1<<MAX_CODE_SIZE)
@@ -74,6 +78,12 @@
 // expanded LZW buffer for Turbo mode
 #define LZW_BUF_SIZE_TURBO (LZW_BUF_SIZE + (2<<MAX_CODE_SIZE) + (PIXEL_LAST*2) + MAX_WIDTH)
 #define LZW_HIGHWATER_TURBO ((LZW_BUF_SIZE_TURBO * 14) / 16)
+
+
+/* Defines sanity checks */
+#if FILE_BUF_SIZE < MAX_CHUNK_SIZE || FILE_BUF_SIZE < 3 * MAX_COLORS
+  #error "FILE_BUF_SIZE is too small"
+#endif
 
 //
 // Pixel types
@@ -190,8 +200,8 @@ typedef struct gif_image_tag
     unsigned char *pFrameBuffer;
     unsigned char *pTurboBuffer;
     unsigned char *pPixels, *pOldPixels;
-    unsigned char ucFileBuf[FILE_BUF_SIZE]; // holds temp data and pixel stack
-    unsigned short pPalette[(MAX_COLORS * 3)/2]; // can hold RGB565 or RGB888 - set in begin()
+    unsigned char ucFileBuf[FILE_BUF_SIZE]; // used for reading GIF information and meta data
+    unsigned short pPalette[(MAX_COLORS * 3)/2]; // can hold RGB565 or RGB888 or 1BPP - set in begin()
     unsigned short pLocalPalette[(MAX_COLORS * 3)/2]; // color palettes for GIF images
     unsigned char ucLZW[LZW_BUF_SIZE]; // holds de-chunked LZW data
     // These next 3 are used in Turbo mode to have a larger ucLZW buffer
