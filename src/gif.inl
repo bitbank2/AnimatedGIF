@@ -1211,7 +1211,7 @@ init_codetable:
         gd.pPalette24 = (uint8_t *)gd.pPalette; // just cast the pointer for RGB888
         gd.ucIsGlobalPalette = pImage->bUseLocalPalette==1?0:1;
         gd.pUser = pImage->pUser;
-
+        gd.ucPaletteType = pImage->ucPaletteType;
         for (int y=0; y<pImage->iHeight; y++) {
             gd.y = y;
             gd.pPixels = &buf[(y * pImage->iWidth)]; // source pixels
@@ -1330,6 +1330,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             gd.ucBackground = pPage->ucBackground;
             gd.iCanvasWidth = pPage->iCanvasWidth;
             gd.pUser = pPage->pUser;
+            gd.ucPaletteType = pPage->ucPaletteType;
             if (pPage->pFrameBuffer) // update the frame buffer
             {
                 if (pPage->ucDrawType == GIF_DRAW_COOKED) {
