@@ -1117,7 +1117,7 @@ int iUncompressedLen;
 uint32_t code, oldcode, codesize, nextcode, nextlim;
 uint32_t cc, eoi;
 uint32_t sMask;
-uint8_t c, *p, *buf, codestart;
+uint8_t c, *p, *buf, codestart, *pHighWater;
 BIGUINT ulBits;
 int iLen, iColors;
 int iErr = GIF_SUCCESS;
@@ -1129,6 +1129,7 @@ uint16_t *pLengths;
     pImage->iYCount = pImage->iHeight; // count down the lines
     pImage->iXCount = pImage->iWidth;
     bitnum = 0;
+    pHighWater = pImage->ucLZW + LZW_HIGHWATER_TURBO;
     pImage->iLZWOff = 0; // Offset into compressed data
     GIFGetMoreData(pImage); // Read some data to start
     codestart = pImage->ucCodeStart;
@@ -1191,11 +1192,11 @@ init_codetable:
                 codesize++;
                 nextlim <<= 1;
                 sMask = (sMask << 1) | 1;
-                if (p >= (pImage->ucLZW + LZW_HIGHWATER_TURBO)) { // good place to see if we need more compressed data
-                    pImage->iLZWOff = (int)(p - pImage->ucLZW); // restore object member var
-                    GIFGetMoreData(pImage); // We need to read more LZW data
-                    p = &pImage->ucLZW[pImage->iLZWOff];
-                }
+            }
+            if (p >= pHighWater) {
+                pImage->iLZWOff = (int)(p - pImage->ucLZW); // restore object member var
+                GIFGetMoreData(pImage); // We need to read more LZW data
+                p = &pImage->ucLZW[pImage->iLZWOff];
             }
             oldcode = code;
             GET_CODE_TURBO
@@ -1287,8 +1288,8 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             }
             pPage->iXCount -= iPixCount;
             //         iPixCount = 0;
-//            if (pPage->iLZWOff >= LZW_HIGHWATER)
-//                GIFGetMoreData(pPage); // We need to read more LZW data
+            if (pPage->iLZWOff >= LZW_HIGHWATER)
+                GIFGetMoreData(pPage); // We need to read more LZW data
             return;
         }
         else  /* Pixels cross into next line */
