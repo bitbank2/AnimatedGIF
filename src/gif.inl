@@ -765,7 +765,9 @@ static int GIFGetMoreData(GIFIMAGE *pPage)
 static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
 {
     uint8_t c, *s, *d8, *pEnd;
-
+    uint8_t *pActivePalette;
+    
+    pActivePalette = (pPage->bUseLocalPalette) ? (uint8_t *)pPage->pLocalPalette : (uint8_t *)pPage->pPalette;
     // d8 points to the line in the full sized canvas where the new opaque pixels will be merged
     d8 = &pPage->pFrameBuffer[pDraw->iX + (pDraw->iY + pDraw->y) * pPage->iCanvasWidth];
     s = pDraw->pPixels; // s points to the newly decoded pixels of this line of the current frame
@@ -773,7 +775,7 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
     
     if (pPage->ucPaletteType == GIF_PALETTE_1BPP || pPage->ucPaletteType == GIF_PALETTE_1BPP_OLED) { // 1-bit mono
         uint8_t *d = NULL;
-        uint8_t *pPal = (uint8_t*)pDraw->pPalette;
+        uint8_t *pPal = pActivePalette;
         uint8_t uc, ucMask;
          if (pPage->ucPaletteType == GIF_PALETTE_1BPP) { // horizontal pixels
              // Apply the new pixels to the main image and generate 1-bpp output
@@ -860,11 +862,11 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                          c = *s++;
                          uc = *d & ~ucMask;
                          if (c != ucTransparent) {
-                             *d++ = uc | (pPal[c] * ucMask);
-                             *d8++ = c;
-                         } else {
-                             *d++ = uc | (pPal[*d8++] * ucMask);
+                             *d = uc | (pPal[c] * ucMask);
+                             *d8 = c;
                          }
+                         d++;
+                         d8++;
                      }
                  }
              } else { // convert everything as opaque
@@ -876,7 +878,7 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
              }
          }
     } else if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE) {
-        uint16_t *d, *pPal = (uint16_t *)pDraw->pPalette;
+        uint16_t *d, *pPal = (uint16_t *)pActivePalette;
         d = (uint16_t *)pDest; // dest pointer to the cooked pixels
         // Apply the new pixels to the main image
         if (pDraw->ucHasTransparency) { // if transparency used
@@ -897,11 +899,11 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                 while (s < pEnd) {
                     c = *s++;
                     if (c != ucTransparent) {
-                        *d++ = pPal[c];
-                        *d8++ = c;
-                    } else {
-                        *d++ = pPal[*d8++];
+                        *d = pPal[c];
+                        *d8 = c;
                     }
+                    d++;
+                    d8++;
                 }
             }
         } else { // convert all pixels through the palette without transparency
@@ -936,7 +938,7 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
         uint8_t pixel, *d, *pPal;
         int x;
         d = (uint8_t *)pDest;
-        pPal = (uint8_t *)pDraw->pPalette;
+        pPal = pActivePalette;
         if (pDraw->ucHasTransparency) {
             uint8_t ucTransparent = pDraw->ucTransparent;
             if (pDraw->ucDisposalMethod == 2) { // restore to background color
@@ -955,27 +957,27 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                 if (pPage->ucPaletteType == GIF_PALETTE_RGB888) {
                     for (x=0; x<pPage->iWidth; x++) {
                         pixel = *s++;
-                        if (pixel == ucTransparent)
-                            pixel = *d8;
-                        else
+                        if (pixel != ucTransparent) {
                             *d8 = pixel;
-                        *d++ = pPal[(pixel * 3) + 0]; // convert to RGB888 pixels
-                        *d++ = pPal[(pixel * 3) + 1];
-                        *d++ = pPal[(pixel * 3) + 2];
+                            d[0] = pPal[(pixel * 3) + 0]; // convert to RGB888 pixels
+                            d[1] = pPal[(pixel * 3) + 1];
+                            d[2] = pPal[(pixel * 3) + 2];
+                        }
                         d8++;
+                        d += 3;
                     }
                 } else { // must be RGBA32
                     for (x=0; x<pPage->iWidth; x++) {
                         pixel = *s++;
-                        if (pixel == ucTransparent)
-                            pixel = *d8;
-                        else
+                        if (pixel != ucTransparent) {
                             *d8 = pixel;
-                        *d++ = pPal[(pixel * 3) + 0]; // convert to RGB8888 pixels
-                        *d++ = pPal[(pixel * 3) + 1];
-                        *d++ = pPal[(pixel * 3) + 2];
-                        *d++ = 0xff;
+                            d[0] = pPal[(pixel * 3) + 0]; // convert to RGB8888 pixels
+                            d[1] = pPal[(pixel * 3) + 1];
+                            d[2] = pPal[(pixel * 3) + 2];
+                            d[3] = 0xff;
+                        }
                         d8++;
+                        d += 4;
                     }
                 }
             }
@@ -1334,10 +1336,32 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             gd.ucPaletteType = pPage->ucPaletteType;
             if (pPage->pFrameBuffer) // update the frame buffer
             {
+                int iPitch = 0, iBpp = 1, iOffset = pPage->iCanvasWidth * pPage->iCanvasHeight;
                 if (pPage->ucDrawType == GIF_DRAW_COOKED) {
-                    DrawCooked(pPage, &gd, &pPage->pFrameBuffer[pPage->iCanvasWidth * pPage->iCanvasHeight]);
+                    if (!pPage->pfnDraw) { // no draw callback, prepare the full frame
+                        switch (pPage->ucPaletteType) {
+                            case GIF_PALETTE_1BPP:
+                                iPitch = (pPage->iCanvasWidth + 7) / 8;
+                                break;
+                            case GIF_PALETTE_RGB565_BE:
+                            case GIF_PALETTE_RGB565_LE:
+                                iPitch = (pPage->iCanvasWidth * 2);
+                                iBpp = 2;
+                                break;
+                            case GIF_PALETTE_RGB888:
+                                iPitch = pPage->iCanvasWidth * 3;
+                                iBpp = 3;
+                                break;
+                            case GIF_PALETTE_RGB8888:
+                                iPitch = pPage->iCanvasWidth * 4;
+                                iBpp = 4;
+                                break;
+                        }
+                        iOffset += (iBpp * pPage->iX) + ((gd.y + pPage->iY) * iPitch);
+                    }
+                    DrawCooked(pPage, &gd, &pPage->pFrameBuffer[iOffset]);
                     // pass the cooked pixel pointer to the GIFDraw callback
-                    gd.pPixels = &pPage->pFrameBuffer[pPage->iCanvasWidth * pPage->iCanvasHeight];
+                    gd.pPixels = &pPage->pFrameBuffer[iOffset];
                 } else { // the user will manage converting them through the palette
                     DrawNewPixels(pPage, &gd); // merge the new opaque pixels
                 }
