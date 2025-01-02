@@ -52,7 +52,17 @@
 // with 256 entries
 //
 #define TURBO_BUFFER_SIZE 0x6100
+
+// If you intend to decode generic GIFs, you want this value to be 12. If you are using GIFs solely for animations in
+// your own project, and you control the GIFs you intend to play, then you can save additional RAM here: 
+// the decoder must reserve a minimum of 4 byte * (1<<MAX_CODE_SIZE) for the dictionary, but based on implementation
+// actually reserves 5 byte * (1<<MAX_CODE_SIZE). Small or low colour GIFs may inherently not require a large
+// dictionary. For larger GIFs, the en(!)coder can "voluntarily" choose not to utilize the entire dictionary. I.e.,
+// by preparing (specially encoding) the GIFs, you can save >10kB RAM, but you will not be able to decode arbitrary
+// images anymore. One application to craft such GIFs can be found here (use option -d) 
+// https://create.stephan-brumme.com/flexigif-lossless-gif-lzw-optimization/
 #define MAX_CODE_SIZE 12
+
 #define MAX_COLORS 256
 #ifdef __LINUX__
 #define MAX_WIDTH 2048
