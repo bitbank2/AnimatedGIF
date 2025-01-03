@@ -1455,11 +1455,8 @@ init_codetable:
                     gifpels[PIXEL_LAST + nextcode] = c = gifpels[PIXEL_FIRST + code];
                 }
                 nextcode++;
-                if (nextcode >= nextlim)
+                if (nextcode >= nextlim && codesize < MAX_CODE_SIZE)
                 {
-                    if (codesize >= MAX_CODE_SIZE)
-                        return -1; // error. encoder assumed a larger dictionary than we can accommodate. decoding
-                                   // the remainder of the image would be unpredictable and possibly dangerous
                     codesize++;
                     nextlim <<= 1;
                     sMask = nextlim - 1;
