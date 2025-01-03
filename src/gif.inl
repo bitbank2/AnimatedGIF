@@ -1431,7 +1431,7 @@ init_codetable:
     nextcode = cc + 2;
     nextlim = (unsigned short) ((1 << codesize));
     // This part of the table needs to be reset multiple times
-    memset(&giftabs[cc], LINK_UNUSED, (4096 - cc)*sizeof(short));
+    memset(&giftabs[cc], LINK_UNUSED, sizeof(pImage->usGIFTable) - sizeof(giftabs[0])*cc);
     ulBits = INTELLONG(&p[pImage->iLZWOff]); // start by reading 4 bytes of LZW data
     GET_CODE
     if (code == cc) // we just reset the dictionary, so get another code
