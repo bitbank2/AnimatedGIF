@@ -1,126 +1,65 @@
 #include <AnimatedGIF.h>
 #include <bb_spi_lcd.h>
 #include "../test_images/badgers.h"
-
-#define LED_PIN       -1
-#define CS_PIN        -1
-#define RESET_PIN      5
-#define DC_PIN         4
-#define MOSI_PIN -1
-#define SCK_PIN -1
-#define MISO_PIN -1
-
-//#define MOSI_PIN       7
-//#define SCK_PIN        5
-//#define MISO_PIN       6
-
-// ST7735 width
-#define DISPLAY_WIDTH 160
 AnimatedGIF gif;
-uint8_t ucTXBuf[1024];
-
-// Draw a line of image directly on the LCD
+BB_SPI_LCD lcd;
+int iXOff, iYOff;
+//
+// The GIFDraw callback is passed each line of image data one by one
+// When using the 'COOKED' output mode, the pixels are translated through the palette
+// and ready to draw directly on the output device.
+// GIF files can make things complicated due to dynamic palette changes and transparent pixels
+// COOKED output can look wrong if only drawing each line and a local palette change has
+// occurred on the canvas; parts that are not overwritten by the current frame will have the wrong
+// colors.
+//
+// N.B.
+// When using microcontrollers for playing GIF files, it's best to create animations which only use
+// a global palette. In order to draw local palette changes, the entire canvas of pixels must be run
+// through the palette each time it changes. This would slow down the output considerably and make
+// it impractical on SPI LCDs and MCUs with a small amount of RAM
+//
 void GIFDraw(GIFDRAW *pDraw)
 {
-    uint8_t *s;
-    uint16_t *d, *usPalette, usTemp[320];
-    int x, y, iWidth;
-
-    usPalette = pDraw->pPalette;
-    y = pDraw->iY + pDraw->y; // current line
-    iWidth = pDraw->iWidth;
-    if (iWidth > DISPLAY_WIDTH)
-       iWidth = DISPLAY_WIDTH;
-    s = pDraw->pPixels;
-    if (pDraw->ucDisposalMethod == 2) // restore to background color
-    {
-      for (x=0; x<iWidth; x++)
-      {
-        if (s[x] == pDraw->ucTransparent)
-           s[x] = pDraw->ucBackground;
-      }
-      pDraw->ucHasTransparency = 0;
+    if (pDraw->y == 0) { // first line, set output window on the LCD
+      lcd.setAddrWindow(iXOff + pDraw->iX, iYOff + pDraw->iY, pDraw->iWidth, pDraw->iHeight);
     }
-    // Apply the new pixels to the main image
-    if (pDraw->ucHasTransparency) // if transparency used
-    {
-      uint8_t *pEnd, c, ucTransparent = pDraw->ucTransparent;
-      int x, iCount;
-      pEnd = s + iWidth;
-      x = 0;
-      iCount = 0; // count non-transparent pixels
-      while(x < iWidth)
-      {
-        c = ucTransparent-1;
-        d = usTemp;
-        while (c != ucTransparent && s < pEnd)
-        {
-          c = *s++;
-          if (c == ucTransparent) // done, stop
-          {
-            s--; // back up to treat it like transparent
-          }
-          else // opaque
-          {
-             *d++ = usPalette[c];
-             iCount++;
-          }
-        } // while looking for opaque pixels
-        if (iCount) // any opaque pixels?
-        {
-          spilcdSetPosition(pDraw->iX+x, y, iCount, 1, 1);
-          spilcdWriteDataBlock((uint8_t *)usTemp, iCount*2, 1);
-          x += iCount;
-          iCount = 0;
-        }
-        // no, look for a run of transparent pixels
-        c = ucTransparent;
-        while (c == ucTransparent && s < pEnd)
-        {
-          c = *s++;
-          if (c == ucTransparent)
-             iCount++;
-          else
-             s--; 
-        }
-        if (iCount)
-        {
-          x += iCount; // skip these
-          iCount = 0;
-        }
-      }
-    }
-    else
-    {
-      s = pDraw->pPixels;
-      // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
-      for (x=0; x<iWidth; x++)
-        usTemp[x] = usPalette[*s++];
-      spilcdSetPosition(pDraw->iX, y, iWidth, 1, 1);
-      spilcdWriteDataBlock((uint8_t *)usTemp, iWidth*2, 1);
-    }
+    // Push the current line of pixels to the display
+    // We opted for 'COOKED' output, so the pixels have been converted for transparency and palette lookup
+    lcd.pushPixels((uint16_t *)pDraw->pPixels, pDraw->iWidth);
 } /* GIFDraw() */
 
 void setup() {
-  Serial.begin(115200);
-  while (!Serial);
-
-  spilcdSetTXBuffer(ucTXBuf, sizeof(ucTXBuf));
-  spilcdInit(LCD_ST7735R, 0, 0, 1, 20000000, CS_PIN, DC_PIN, RESET_PIN, LED_PIN, MISO_PIN, MOSI_PIN, SCK_PIN); // custom ESP32 rig
-  spilcdSetOrientation(LCD_ORIENTATION_ROTATED);
-  spilcdFill(0,1);
-
-  gif.begin(BIG_ENDIAN_PIXELS);
+  lcd.begin(DISPLAY_WS_AMOLED_18); // Waveshare ESP32-S3 AMOLED 1.8" 368x448
+  lcd.fillScreen(TFT_BLACK);
+  lcd.setFont(FONT_12x16);
+  gif.begin(BIG_ENDIAN_PIXELS); // bb_spi_lcd assumes all displays use big-endian RGB565 pixels
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  if (gif.open((uint8_t *)ucBadgers, sizeof(ucBadgers), GIFDraw))
-  {
-    Serial.printf("Successfully opened GIF; Canvas size = %d x %d\n", gif.getCanvasWidth(), gif.getCanvasHeight());
-    while (gif.playFrame(true, NULL))
-    {      
+uint8_t *pFramebuf;
+int w, h;
+
+  if (gif.open((uint8_t *)badgers, sizeof(badgers), GIFDraw)) {
+    gif.setDrawType(GIF_DRAW_COOKED);
+    w = gif.getCanvasWidth();
+    h = gif.getCanvasHeight();
+    iXOff = (lcd.width() - w)/2; // center it on the LCD
+    iYOff = (lcd.height() - h)/2;
+    // For cooked (fully prepared) output we need to allocate a buffer the size of the canvas+2 lines
+    pFramebuf = (uint8_t *)malloc(w * (h+2));
+    if (!pFramebuf) { // out of memory
+      lcd.setTextColor(TFT_RED);
+      lcd.print("Insufficient memory!");
+      while (1) {}; // stop
     }
-    gif.close();
-  }
-}
+    gif.setFrameBuf(pFramebuf);
+    lcd.setTextColor(TFT_GREEN);
+    lcd.println("GIF opened");
+    lcd.printf("Canvas: %d x %d", w, h);
+    while (1) { // play it looping forever
+      while (gif.playFrame(true, NULL)) {  /* nothing needed here */ }
+      gif.reset();
+    }
+  } // GIF openeded successfully
+} /* loop() */
