@@ -19,7 +19,18 @@ MCU Accomodations
 -----------------
 
 The original idea of this project was to bring efficient GIF decoding to MCUs with insufficient memory to hold the entire framebuffer. It grew to include design features meant to accelerate SPI LCD output. The premise is that for most images, each line can be decoded and sent to the display (hopefully using DMA) while the next line is being decoded. This allows the SPI transmit time to essentially vanish and greatly reduces the amount of memory required. Not all images behave well with this arrangement - certain disposal options will not render correctly and images with lots of alternating transparent/opaque pixels will slow down the SPI output due to the mode switching. The other goal was to not dynamically allocate and free memory; all buffers are managed outside of the library. This allows the code to compile as C99 with no external dependencies beyond the basic clib/string functions.<br><br>
-<b>N.B. Using a minimum of RAM on an MCU (not holding on to the fully rendered canvas) presents limitations on what files will display correctly. Specifically, GIF files with local color palettes WILL NOT DISPLAY CORRECTLY unless you keep a copy of the entire canvas in the final output pixel type (e.g. Width * Height * 3-bytes per pixel).</b>
+<b>
+```diff
+- N.B. Using a minimum of RAM on an MCU (not holding on to the fully rendered canvas) presents
+- limitations on speed and what files will display correctly. If you're using a SPI LCD and manage
+- the palette translation yourself, your code will update the display slower when there are
+- alternating areas of transparent and opaque pixels because the LCD must be sent windowing
+- commands in between the runs of pixels. If you instead choose to let AnimatedGIF handle
+- the palette translation (COOKED mode), you run into a problem with GIF files that have
+- local color palettes. They will not display correctly unless you keep a copy of the
+- entire canvas in the final output pixel type (e.g. Width * Height * 3-bytes per pixel).
+```
+</b>
 
 It's Easy Until It's Not
 ------------------------
