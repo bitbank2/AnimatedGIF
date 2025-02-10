@@ -174,6 +174,25 @@ int AnimatedGIF::getCanvasWidth()
     return _gif.iCanvasWidth;
 } /* getCanvasWidth() */
 
+int AnimatedGIF::getFrameWidth()
+{
+    return _gif.iWidth;
+}
+int AnimatedGIF::getFrameHeight()
+{
+    return _gif.iHeight;
+}
+
+int AnimatedGIF::getFrameXOff()
+{
+    return _gif.iX;
+} /* AnimatedGIF() */
+
+int AnimatedGIF::getFrameYOff()
+{
+    return _gif.iY;
+}
+
 int AnimatedGIF::getCanvasHeight()
 {
     return _gif.iCanvasHeight;

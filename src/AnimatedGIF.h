@@ -227,6 +227,10 @@ class AnimatedGIF
     void begin(int iEndian, uint8_t ucPaletteType) { begin(ucPaletteType); };
     int playFrame(bool bSync, int *delayMilliseconds, void *pUser = NULL);
     int getCanvasWidth();
+    int getFrameWidth();
+    int getFrameHeight();
+    int getFrameXOff();
+    int getFrameYOff();
     int allocTurboBuf(GIF_ALLOC_CALLBACK *pfnAlloc);
     int allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc);
     void setTurboBuf(void *pTurboBuffer);
