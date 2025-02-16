@@ -109,7 +109,7 @@ void GIFDraw(GIFDRAW *pDraw)
       {
         for (int xOffset = 0; xOffset < iCount; xOffset++)
         {
-          dma_display->drawPixel(x + xOffset, y, usTemp[xOffset]);
+          dma_display->drawPixel(x + xOffset + pDraw->iX, y, usTemp[xOffset]);
         }
         x += iCount;
         iCount = 0;
@@ -137,7 +137,7 @@ void GIFDraw(GIFDRAW *pDraw)
     // Translate the 8-bit pixels through the RGB565 palette (already byte reversed)
     for (x = 0; x < pDraw->iWidth; x++)
     {
-      dma_display->drawPixel(x, y, usPalette[*s++]);
+      dma_display->drawPixel(x + pDraw->iX, y, usPalette[*s++]);
     }
   }
 } /* GIFDraw() */
