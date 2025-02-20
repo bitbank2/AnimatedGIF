@@ -251,7 +251,7 @@ static int GIFInit(GIFIMAGE *pGIF)
     if (!GIFParseInfo(pGIF, 1)) // gather info for the first frame
        return 0; // something went wrong; not a GIF file?
     (*pGIF->pfnSeek)(&pGIF->GIFFile, 0); // seek back to start of the file
-    if (pGIF->iCanvasWidth > MAX_WIDTH) { // need to allocate more space
+    if (pGIF->iCanvasWidth > MAX_WIDTH || pGIF->iCanvasHeight > 32767) { // too big or corrupt
         pGIF->iError = GIF_TOO_WIDE;
         return 0;
     }
@@ -448,6 +448,11 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
     pPage->iY = INTELSHORT(&p[iOffset+2]);
     pPage->iWidth = INTELSHORT(&p[iOffset+4]);
     pPage->iHeight = INTELSHORT(&p[iOffset+6]);
+    if (pPage->iWidth > pPage->iCanvasWidth || pPage->iHeight > pPage->iCanvasHeight ||
+        pPage->iWidth + pPage->iX > pPage->iCanvasWidth || pPage->iHeight + pPage->iY > pPage->iCanvasHeight) {
+        pPage->iError = GIF_DECODE_ERROR; // must be a corrupt file to encounter this error here
+        return 0;
+    }
     iOffset += 8;
     
     /* Image descriptor
@@ -1269,7 +1274,6 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
         code = giftabs[code];
     }
     iPixCount = (int)(intptr_t)(pEnd + FILE_BUF_SIZE - s);
-    
     while (iPixCount && pPage->iYCount > 0)
     {
         if (pPage->iXCount > iPixCount)  /* Pixels fit completely on the line */
@@ -1404,6 +1408,10 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     // if output can be used for string table, do it faster
     //       if (bGIF && (OutPage->cBitsperpixel == 8 && ((OutPage->iWidth & 3) == 0)))
     //          return PILFastLZW(InPage, OutPage, bGIF, iOptions);
+    if (pImage->ucDrawType == GIF_DRAW_COOKED && pImage->pFrameBuffer == NULL && pImage->pfnDraw == NULL) { // without a framebuffer and a GIFDRAW callback, we cannot continue
+        pImage->iError = GIF_INVALID_PARAMETER;
+        return 1; // indicate a problem
+    }
     p = pImage->ucLZW; // un-chunked LZW data
     sMask = 0xffff << (pImage->ucCodeStart + 1);
     sMask = 0xffff - sMask;
