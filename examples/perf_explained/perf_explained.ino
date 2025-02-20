@@ -11,6 +11,8 @@
 // uses more than 100K of RAM which is not possible to allocate as a single
 // block in ESP32 SRAM
 //
+// N.B. Set the ESP32 FLASH partition scheme to "HUGE APP" or this project won't fit
+//
 // Cause a compilation error if the target is an ESP32 and PSRAM is not enabled
 #if defined(ARDUINO_ARCH_ESP32) && !defined(BOARD_HAS_PSRAM)
 #error "Please enable PSRAM support"
@@ -19,10 +21,14 @@
 #include <bb_spi_lcd.h>
 #include <AnimatedGIF.h>
 #include "matrix_small.h"
+#include "../../test_images/thisisfine_240x179.h"
+
 AnimatedGIF gif;
 BB_SPI_LCD lcd;
 uint8_t *pFrameBuffer;
 int iXOff, iYOff;
+bool bDMA = false;
+static uint8_t *pDMA;
 //
 // This version of GIFDraw manages the transparent pixels and palette
 // changes by depending on the display (external) framebuffer to hold
@@ -129,18 +135,25 @@ void GIFDraw(GIFDRAW *pDraw)
   if (pDraw->y == 0) { // set address window on first line
     lcd.setAddrWindow(pDraw->iX + iXOff, pDraw->iY + iYOff, pDraw->iWidth, pDraw->iHeight);
   }
-  lcd.pushPixels((uint16_t *)pDraw->pPixels, pDraw->iWidth);
+  if (bDMA) {
+      memcpy(pDMA, pDraw->pPixels, pDraw->iWidth*2); // use DMA memory to not cause the SPI driver to allocate a block for you
+      lcd.pushPixels((uint16_t *)pDMA, pDraw->iWidth, DRAW_TO_LCD | DRAW_WITH_DMA);
+  } else {
+      lcd.pushPixels((uint16_t *)pDraw->pPixels, pDraw->iWidth);
+  }
 } /* GIFDraw() */
 
 void setup()
 {
   int h, w, iFrame;
   long lTime;
+//  lcd.begin(DISPLAY_M5STACK_CORES3);
   lcd.begin(DISPLAY_CYD_543); // 4.3" 480x270 ESP32-S3 W/PSRAM
   lcd.fillScreen(TFT_BLACK);
   gif.begin(GIF_PALETTE_RGB565_BE); // we want big-endian RGB565
   lcd.setTextColor(TFT_GREEN);
-  lcd.setFont(FONT_12x16);
+  lcd.setFont((lcd.width() > 320) ? FONT_12x16 : FONT_8x8);
+
   lcd.println("RAW pixel demo (<20K RAM needed)");
   lcd.println("Draws 1 line at a time");
   lcd.println("(GIF has local color palettes)");
@@ -161,6 +174,7 @@ void setup()
   lcd.setCursor(0, lcd.height() - 16);
   lcd.printf("%d frames in %d ms", iFrame, (int)lTime);
   delay(5000);
+
   lcd.fillScreen(TFT_BLACK);
   lcd.printf("COOKED pixel demo (%d K needed)\n", 20 + ((w * (h+2))/1024));
   lcd.println("Without buffering the full output");
@@ -194,6 +208,7 @@ void setup()
   lcd.setCursor(0, lcd.height() - 16);
   lcd.printf("%d frames in %d ms", iFrame, (int)lTime);
   delay(5000);
+
   lcd.fillScreen(TFT_BLACK);
   lcd.println("If we keep a full canvas");
   lcd.printf("of COOKED pixels in memory (%d K)\n", 20 + ((w*h*3)/1024));
@@ -242,6 +257,75 @@ void setup()
     lcd.setCursor(0, lcd.height() - 16);
     lcd.printf("%d frames in %d ms", iFrame, (int)lTime);
   }
+  delay(5000);
+  lcd.fillScreen(TFT_BLACK);
+  lcd.println("This demo has no local palette");
+  lcd.println("and shows the benefit of DMA");
+  lcd.println("(first pass - no DMA)");
+  bDMA = false;
+  if (gif.open((uint8_t *)thisisfine_240x179, sizeof(thisisfine_240x179), GIFDraw)) {
+    w = gif.getCanvasWidth();
+    h = gif.getCanvasHeight();
+    iXOff = (lcd.width() - w)/2; // center on the LCD
+    iYOff = (lcd.height() - h)/2;
+    pFrameBuffer = (uint8_t *)ps_malloc(w * (h+2)); // 2 extra lines for cooked pixels
+    if (pFrameBuffer == NULL) { // trouble, we can't allocate 40K of RAM
+      lcd.setTextColor(TFT_RED);
+      lcd.printf("Unable to allocate %d bytes!", w * (h+2));
+      while (1) {};
+    }
+    gif.setDrawType(GIF_DRAW_COOKED);
+    gif.setFrameBuf(pFrameBuffer);
+    iFrame = 0;
+    lTime = millis();
+    while (gif.playFrame(false, NULL)) {
+      iFrame++;
+     }
+    gif.close();
+    lTime = millis() - lTime;
+    free(pFrameBuffer);
+  }
+  lcd.setCursor(0, lcd.height() - 16);
+  lcd.printf("%d frames in %d ms", iFrame, (int)lTime);
+  delay(5000);
+//
+// This demo enables Direct-Memory-Access when sending pixels to the LCD
+// Translation - the MCU can send the data to the display while the CPU goes back
+// to work on decoding more pixels
+// This can effectively reduce the I/O time to 0 if the CPU work takes longer than
+// sending the data to the display
+//
+  lcd.fillScreen(TFT_BLACK);
+  lcd.println("Now with DMA");
+  bDMA = true;
+  // We need to allocate memory that's usable with DMA, otherwise the Espressif SPI driver
+  // will allocate (and leak!) a buffer for each transaction
+  pDMA = (uint8_t *)heap_caps_malloc(320*2, MALLOC_CAP_DMA);
+  if (gif.open((uint8_t *)thisisfine_240x179, sizeof(thisisfine_240x179), GIFDraw)) {
+    w = gif.getCanvasWidth();
+    h = gif.getCanvasHeight();
+    iXOff = (lcd.width() - w)/2; // center on the LCD
+    iYOff = (lcd.height() - h)/2;
+    pFrameBuffer = (uint8_t *)malloc(w * (h+2)); // 2 extra lines for cooked pixels
+    if (pFrameBuffer == NULL) { // trouble, we can't allocate 40K of RAM
+      lcd.setTextColor(TFT_RED);
+      lcd.printf("Unable to allocate %d bytes!", w * (h+2));
+      while (1) {};
+    }
+    gif.setDrawType(GIF_DRAW_COOKED);
+    gif.setFrameBuf(pFrameBuffer);
+    iFrame = 0;
+    lTime = millis();
+    while (gif.playFrame(false, NULL)) {
+      iFrame++;
+     }
+    gif.close();
+    lTime = millis() - lTime;
+    free(pFrameBuffer);
+  }
+  free(pDMA);
+  lcd.setCursor(0, lcd.height() - 16);
+  lcd.printf("%d frames in %d ms", iFrame, (int)lTime);
 } /* setup() */
 
 void loop()
