@@ -147,8 +147,8 @@ void setup()
 {
   int h, w, iFrame;
   long lTime;
-//  lcd.begin(DISPLAY_M5STACK_CORES3);
-  lcd.begin(DISPLAY_CYD_543); // 4.3" 480x270 ESP32-S3 W/PSRAM
+  lcd.begin(DISPLAY_M5STACK_CORES3);
+//  lcd.begin(DISPLAY_CYD_543); // 4.3" 480x270 ESP32-S3 W/PSRAM
   lcd.fillScreen(TFT_BLACK);
   gif.begin(GIF_PALETTE_RGB565_BE); // we want big-endian RGB565
   lcd.setTextColor(TFT_GREEN);

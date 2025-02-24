@@ -1412,6 +1412,11 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
         pImage->iError = GIF_INVALID_PARAMETER;
         return 1; // indicate a problem
     }
+    // If the user selected RAW output and there is no GIFDRAW callback, that won't work either
+    if (pImage->ucDrawType == GIF_DRAW_RAW && pImage->pfnDraw == NULL) {
+        pImage->iError = GIF_INVALID_PARAMETER;
+        return 1; // indicate a problem
+    }
     p = pImage->ucLZW; // un-chunked LZW data
     sMask = 0xffff << (pImage->ucCodeStart + 1);
     sMask = 0xffff - sMask;
