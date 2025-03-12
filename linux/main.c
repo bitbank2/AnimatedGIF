@@ -28,7 +28,7 @@ int rc, iFrame;
     if (argc == 2) // use filename
         rc = GIF_openFile(&gif, argv[1], GIFDraw);
     else
-        rc = GIF_openRAM(&gif, (uint8_t *)ucBadgers, sizeof(ucBadgers), GIFDraw);
+        rc = GIF_openRAM(&gif, (uint8_t *)badgers, sizeof(badgers), GIFDraw);
     if (rc)
     {
         printf("Successfully opened GIF\n");
