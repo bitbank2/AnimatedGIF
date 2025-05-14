@@ -39,6 +39,7 @@ int AnimatedGIF::open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
     return GIFInit(&_gif);
 } /* open() */
 
+#ifdef ARDUINO
 int AnimatedGIF::openFLASH(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
 {
     _gif.iError = GIF_SUCCESS;
@@ -51,7 +52,7 @@ int AnimatedGIF::openFLASH(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfn
     _gif.GIFFile.pData = pData;
     return GIFInit(&_gif);
 } /* openFLASH() */
-
+#endif
 //
 // Returns the first comment block found (if any)
 //

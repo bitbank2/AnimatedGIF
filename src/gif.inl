@@ -41,7 +41,7 @@ int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo);
 static int32_t readFile(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 static int32_t seekFile(GIFFILE *pFile, int32_t iPosition);
 static void closeFile(void *handle);
-
+static void * openFile(const char *szFilename, int32_t *pFileSize);
 // C API
 int GIF_openRAM(GIFIMAGE *pGIF, uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
 {
@@ -207,6 +207,17 @@ static int32_t seekMem(GIFFILE *pFile, int32_t iPosition)
 } /* seekMem() */
 
 #if defined ( __LINUX__ ) || defined( __MCUXPRESSO )
+void *openFile(const char *filename, int32_t *pFileSize)
+{
+FILE *f;
+    f = fopen(filename, "r+b");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    *pFileSize = (int32_t)ftell(f);
+    fseek(f, 0, SEEK_SET);
+    return (void *)f;
+} /* openFile() */
+
 static void closeFile(void *handle)
 {
     fclose((FILE *)handle);
