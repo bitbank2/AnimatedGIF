@@ -12,15 +12,15 @@
 
 #ifndef __ANIMATEDGIF__
 #define __ANIMATEDGIF__
-#if defined( PICO_BUILD ) || defined( __MACH__ ) || defined( __LINUX__ ) || defined( __MCUXPRESSO )
+#if defined(ARDUINO)
+#include <Arduino.h>
+#else
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #define memcpy_P memcpy
 #define PROGMEM
-#else
-#include <Arduino.h>
 #endif
 
 // Cortex-M4/M7 allow unaligned access to SRAM
@@ -219,9 +219,7 @@ class AnimatedGIF
 {
   public:
     int open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw);
-#ifdef ARDUINO
     int openFLASH(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw);
-#endif
     int open(const char *szFilename, GIF_OPEN_CALLBACK *pfnOpen, GIF_CLOSE_CALLBACK *pfnClose, GIF_READ_CALLBACK *pfnRead, GIF_SEEK_CALLBACK *pfnSeek, GIF_DRAW_CALLBACK *pfnDraw);
     void close();
     void reset();
