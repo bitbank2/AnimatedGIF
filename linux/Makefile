@@ -1,13 +1,15 @@
-CFLAGS=-D__LINUX__ -c -Wall -O2 
-LIBS = 
+CFLAGS=-c -Wall -O2 -ggdb -D__LINUX__ -I../src
+LIBS = -lm -lpthread
 
-all: demo 
+all: libAnimatedGIF.a
 
-demo: main.o
-	$(CC) main.o $(LIBS) -o demo 
+libAnimatedGIF.a: AnimatedGIF.o
+	ar -rc libAnimatedGIF.a AnimatedGIF.o ;\
+	sudo cp libAnimatedGIF.a /usr/local/lib ;\
+	sudo cp ../src/AnimatedGIF.h /usr/local/include
 
-main.o: main.c
-	$(CC) $(CFLAGS) main.c
+AnimatedGIF.o: ../src/AnimatedGIF.cpp ../src/AnimatedGIF.h
+	$(CXX) $(CFLAGS) ../src/AnimatedGIF.cpp
 
 clean:
-	rm -rf *.o demo
+	rm *.o libAnimatedGIF.a
