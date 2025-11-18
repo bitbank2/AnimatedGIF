@@ -931,7 +931,7 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
 #if REGISTER_WIDTH == 64
             // parallelize the writes
             // optimizing for the write buffer helps; reading 4 bytes at a time vs 1 doesn't on M1
-            while (s < pEnd + 4) { // group 4 pixels
+            while (s < pEnd - 3) { // group 4 pixels
                 BIGUINT bu;
                 uint8_t s0, s1, s2, s3;
                 uint16_t d1, d2, d3;
