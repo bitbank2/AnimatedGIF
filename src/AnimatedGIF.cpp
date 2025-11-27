@@ -213,7 +213,12 @@ int AnimatedGIF::getLastError()
 {
     return _gif.iError;
 } /* getLastError() */
-
+#ifdef __LINUX__
+int AnimatedGIF::open(const char *szFilename, GIF_DRAW_CALLBACK *pfnDraw)
+{
+    return GIF_openFile(&_gif, szFilename, pfnDraw);
+} /* open() */
+#endif // __LINUX__
 //
 // File (SD/MMC) based initialization
 //
