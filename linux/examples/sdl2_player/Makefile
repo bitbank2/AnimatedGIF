@@ -1,6 +1,6 @@
 CXX=c++
 LIBS=$(shell pkg-config sdl2 --libs) -lAnimatedGIF
-CXXFLAGS= -Wall $(shell pkg-config sdl2 --cflags)
+CXXFLAGS= -D__LINUX__ -Wall $(shell pkg-config sdl2 --cflags)
 
 all: sdl2_player
 

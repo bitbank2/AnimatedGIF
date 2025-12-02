@@ -51,11 +51,18 @@ int main(int argc, char *argv[])
     canvas->pixels = &pFrameBuf[w * h]; // point to the pixels the library will generate
     winSurface = SDL_GetWindowSurface(win);
     
+    bool bQuit = false;
     int iLoopCount = gif.getLoopCount();
     if (iLoopCount == 0) iLoopCount = 5; // infinite->5
-    for (int i=0; i<iLoopCount; i++) {
-        while (gif.playFrame(false, &rc, NULL)) {
+    for (int i=0; i<iLoopCount && !bQuit; i++) {
+        while (!bQuit && gif.playFrame(false, &rc, NULL)) {
             SDL_Rect rect;
+            SDL_Event e;
+            while (SDL_PollEvent(&e)) { // take care of queued events
+                if (e.type == SDL_QUIT || e.type == SDL_KEYDOWN) {
+                    bQuit = true;
+                }
+            }
             rect.x = gif.getFrameXOff(); rect.y = gif.getFrameYOff();
             rect.w = gif.getFrameWidth(); rect.h = gif.getFrameHeight();
             SDL_BlitSurface(canvas, &rect, winSurface, &rect);
