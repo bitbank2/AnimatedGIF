@@ -796,31 +796,29 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                      // Make an attempt to do disposal method 2 (restore to background color)
                      // even though we can't touch pixels outside of the current frame size.
                      // (the previous frame may be larger or in a different position)
-                     if (!pPage->pFrameBuffer) {
-                         uint8_t u8BG = pPal[pDraw->ucBackground];
-                         if (u8BG == 1) u8BG = 0xff; // set all bits to use mask
-                         uc = *d; ucMask = (0x80 >> (pDraw->iX & 7));;
-                         while (s < pEnd) {
-                             c = *s++;
-                             if (c != ucTransparent) {
-                                 if (pPal[c])
-                                     uc |= ucMask;
-                                 else
-                                     uc &= ~ucMask;
-                                 *d8++ = c;
-                             } else {
-                                 uc |= (u8BG & ucMask); // transparent pixel is restored to background color
-                                 *d8++ = pDraw->ucBackground;
-                             }
-                             ucMask >>= 1;
-                             if (ucMask == 0) { // write the completed byte
-                                 *d++ = uc;
-                                 uc = *d;
-                                 ucMask = 0x80;
-                             }
+                     uint8_t u8BG = pPal[pDraw->ucBackground];
+                     if (u8BG == 1) u8BG = 0xff; // set all bits to use mask
+                     uc = *d; ucMask = (0x80 >> (pDraw->iX & 7));;
+                     while (s < pEnd) {
+                         c = *s++;
+                         if (c != ucTransparent) {
+                             if (pPal[c])
+                                 uc |= ucMask;
+                             else
+                                 uc &= ~ucMask;
+                             *d8++ = c;
+                         } else {
+                             uc |= (u8BG & ucMask); // transparent pixel is restored to background color
+                             *d8++ = pDraw->ucBackground;
                          }
-                         *d = uc; // write last partial byte
+                         ucMask >>= 1;
+                         if (ucMask == 0) { // write the completed byte
+                             *d++ = uc;
+                             uc = *d;
+                             ucMask = 0x80;
+                         }
                      }
+                     *d = uc; // write last partial byte
                  } else { // no disposal, just write non-transparent pixels
                      uc = *d; ucMask = (0x80 >> (pDraw->iX & 7));
                      while (s < pEnd) {
@@ -872,21 +870,19 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                      // Make an attempt to do disposal method 2 (restore to background color)
                      // even though we can't touch pixels outside of the current frame size.
                      // (the previous frame may be larger or in a different position)
-                     if (!pPage->pFrameBuffer) {
-                         uint8_t u8BG = pPal[pDraw->ucBackground];
-                         u8BG *= ucMask; // set the right bit
-                         while (s < pEnd) {
-                             c = *s++;
-                             uc = *d & ~ucMask; // clear old pixel
-                             if (c != ucTransparent) {
-                                 uc |= (pPal[c] * ucMask);
-                                 *d8++ = c;
-                             } else {
-                                 uc |= u8BG; // transparent pixel is restored to background color
-                                 *d8++ = pDraw->ucBackground;
-                             }
-                             *d++ = uc; // write back the updated pixel
+                     uint8_t u8BG = pPal[pDraw->ucBackground];
+                     u8BG *= ucMask; // set the right bit
+                     while (s < pEnd) {
+                         c = *s++;
+                         uc = *d & ~ucMask; // clear old pixel
+                         if (c != ucTransparent) {
+                             uc |= (pPal[c] * ucMask);
+                             *d8++ = c;
+                         } else {
+                             uc |= u8BG; // transparent pixel is restored to background color
+                             *d8++ = pDraw->ucBackground;
                          }
+                         *d++ = uc; // write back the updated pixel
                      }
                  } else { // no disposal, just write non-transparent pixels
                      while (s < pEnd) {
@@ -918,17 +914,15 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                 // Make an attempt to do disposal method 2 (restore to background color)
                 // even though we can't touch pixels outside of the current frame size.
                 // (the previous frame may be larger or in a different position)
-                if (!pPage->pFrameBuffer) {
-                    uint16_t u16BG = pPal[pDraw->ucBackground];
-                    while (s < pEnd) {
-                        c = *s++;
-                        if (c != ucTransparent) {
-                            *d++ = pPal[c];
-                            *d8++ = c;
-                        } else {
-                            *d++ = u16BG; // transparent pixel is restored to background color
-                            *d8++ = pDraw->ucBackground;
-                        }
+                uint16_t u16BG = pPal[pDraw->ucBackground];
+                while (s < pEnd) {
+                    c = *s++;
+                    if (c != ucTransparent) {
+                        *d++ = pPal[c];
+                        *d8++ = c;
+                    } else {
+                        *d++ = u16BG; // transparent pixel is restored to background color
+                        *d8++ = pDraw->ucBackground;
                     }
                 }
             } else { // no disposal, just write non-transparent pixels
@@ -981,17 +975,15 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                 // Make an attempt to do disposal method 2 (restore to background color)
                 // even though we can't touch pixels outside of the current frame size.
                 // (the previous frame may be larger or in a different position)
-                if (!pPage->pFrameBuffer) {
-                    uint16_t u16BG = pPal[pDraw->ucBackground];
-                    while (s < pEnd) {
-                        c = *s++;
-                        if (c != ucTransparent) {
-                            *d++ = pPal[c];
-                            *d8++ = c;
-                        } else {
-                            *d++ = u16BG; // transparent pixel is restored to background color
-                            *d8++ = pDraw->ucBackground;
-                        }
+                uint16_t u16BG = pPal[pDraw->ucBackground];
+                while (s < pEnd) {
+                    c = *s++;
+                    if (c != ucTransparent) {
+                        *d++ = pPal[c];
+                        *d8++ = c;
+                    } else {
+                        *d++ = u16BG; // transparent pixel is restored to background color
+                        *d8++ = pDraw->ucBackground;
                     }
                 }
             } else { // no disposal, just write non-transparent pixels
