@@ -177,6 +177,7 @@ typedef void (GIF_FREE_CALLBACK)(void *buffer);
 typedef struct gif_image_tag
 {
     uint16_t iWidth, iHeight, iCanvasWidth, iCanvasHeight;
+    uint16_t iPrevW, iPrevH, iPrevX, iPrevY; // for disposal method 2 (restore to bg)
     uint16_t iX, iY; // GIF corner offset
     uint16_t iBpp;
     int16_t iError; // last error
@@ -188,6 +189,7 @@ typedef struct gif_image_tag
     int iCommentPos; // file offset of start of comment data
     short sCommentLen; // length of comment
     unsigned char bEndOfFrame;
+    unsigned char ucPrevDisp, ucDisposalMethod;
     unsigned char ucGIFBits, ucBackground, ucTransparent, ucCodeStart, ucMap, bUseLocalPalette;
     unsigned char ucPaletteType; // RGB565 or RGB888
     unsigned char ucDrawType; // RAW or COOKED

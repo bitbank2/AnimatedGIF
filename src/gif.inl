@@ -792,30 +792,35 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
              // Apply the new pixels to the main image and generate 1-bpp output
              if (pDraw->ucHasTransparency) { // if transparency used
                  uint8_t ucTransparent = pDraw->ucTransparent;
-                 if (pDraw->ucDisposalMethod == 2) { // restore to background color
-                     uint8_t u8BG = pPal[pDraw->ucBackground];
-                     if (u8BG == 1) u8BG = 0xff; // set all bits to use mask
-                     uc = *d; ucMask = (0x80 >> (pDraw->iX & 7));;
-                     while (s < pEnd) {
-                         c = *s++;
-                         if (c != ucTransparent) {
-                             if (pPal[c])
-                                uc |= ucMask;
-                             else
-                                uc &= ~ucMask;
-                             *d8++ = c;
-                         } else {
-                             uc |= (u8BG & ucMask); // transparent pixel is restored to background color
-                             *d8++ = pDraw->ucBackground;
+                 if (pDraw->ucDisposalMethod == 2) {
+                     // Make an attempt to do disposal method 2 (restore to background color)
+                     // even though we can't touch pixels outside of the current frame size.
+                     // (the previous frame may be larger or in a different position)
+                     if (!pPage->pFrameBuffer) {
+                         uint8_t u8BG = pPal[pDraw->ucBackground];
+                         if (u8BG == 1) u8BG = 0xff; // set all bits to use mask
+                         uc = *d; ucMask = (0x80 >> (pDraw->iX & 7));;
+                         while (s < pEnd) {
+                             c = *s++;
+                             if (c != ucTransparent) {
+                                 if (pPal[c])
+                                     uc |= ucMask;
+                                 else
+                                     uc &= ~ucMask;
+                                 *d8++ = c;
+                             } else {
+                                 uc |= (u8BG & ucMask); // transparent pixel is restored to background color
+                                 *d8++ = pDraw->ucBackground;
+                             }
+                             ucMask >>= 1;
+                             if (ucMask == 0) { // write the completed byte
+                                 *d++ = uc;
+                                 uc = *d;
+                                 ucMask = 0x80;
+                             }
                          }
-                         ucMask >>= 1;
-                         if (ucMask == 0) { // write the completed byte
-                             *d++ = uc;
-                             uc = *d;
-                             ucMask = 0x80;
-                         }
+                         *d = uc; // write last partial byte
                      }
-                     *d = uc; // write last partial byte
                  } else { // no disposal, just write non-transparent pixels
                      uc = *d; ucMask = (0x80 >> (pDraw->iX & 7));
                      while (s < pEnd) {
@@ -863,20 +868,25 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
              // Apply the new pixels to the main image and generate 1-bpp output
              if (pDraw->ucHasTransparency) { // if transparency used
                  uint8_t ucTransparent = pDraw->ucTransparent;
-                 if (pDraw->ucDisposalMethod == 2) { // restore to background color
-                     uint8_t u8BG = pPal[pDraw->ucBackground];
-                     u8BG *= ucMask; // set the right bit
-                     while (s < pEnd) {
-                         c = *s++;
-                         uc = *d & ~ucMask; // clear old pixel
-                         if (c != ucTransparent) {
-                             uc |= (pPal[c] * ucMask);
-                             *d8++ = c;
-                         } else {
-                             uc |= u8BG; // transparent pixel is restored to background color
-                             *d8++ = pDraw->ucBackground;
+                 if (pDraw->ucDisposalMethod == 2) {
+                     // Make an attempt to do disposal method 2 (restore to background color)
+                     // even though we can't touch pixels outside of the current frame size.
+                     // (the previous frame may be larger or in a different position)
+                     if (!pPage->pFrameBuffer) {
+                         uint8_t u8BG = pPal[pDraw->ucBackground];
+                         u8BG *= ucMask; // set the right bit
+                         while (s < pEnd) {
+                             c = *s++;
+                             uc = *d & ~ucMask; // clear old pixel
+                             if (c != ucTransparent) {
+                                 uc |= (pPal[c] * ucMask);
+                                 *d8++ = c;
+                             } else {
+                                 uc |= u8BG; // transparent pixel is restored to background color
+                                 *d8++ = pDraw->ucBackground;
+                             }
+                             *d++ = uc; // write back the updated pixel
                          }
-                         *d++ = uc; // write back the updated pixel
                      }
                  } else { // no disposal, just write non-transparent pixels
                      while (s < pEnd) {
@@ -904,16 +914,21 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
         // Apply the new pixels to the main image
         if (pDraw->ucHasTransparency) { // if transparency used
             uint8_t ucTransparent = pDraw->ucTransparent;
-            if (pDraw->ucDisposalMethod == 2) { // restore to background color
-                uint16_t u16BG = pPal[pDraw->ucBackground];
-                while (s < pEnd) {
-                    c = *s++;
-                    if (c != ucTransparent) {
-                        *d++ = pPal[c];
-                        *d8++ = c;
-                    } else {
-                        *d++ = u16BG; // transparent pixel is restored to background color
-                        *d8++ = pDraw->ucBackground;
+            if (pDraw->ucDisposalMethod == 2) {
+                // Make an attempt to do disposal method 2 (restore to background color)
+                // even though we can't touch pixels outside of the current frame size.
+                // (the previous frame may be larger or in a different position)
+                if (!pPage->pFrameBuffer) {
+                    uint16_t u16BG = pPal[pDraw->ucBackground];
+                    while (s < pEnd) {
+                        c = *s++;
+                        if (c != ucTransparent) {
+                            *d++ = pPal[c];
+                            *d8++ = c;
+                        } else {
+                            *d++ = u16BG; // transparent pixel is restored to background color
+                            *d8++ = pDraw->ucBackground;
+                        }
                     }
                 }
             } else { // no disposal, just write non-transparent pixels
@@ -962,16 +977,21 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
         pPal = pActivePalette;
         if (pDraw->ucHasTransparency) {
             uint8_t ucTransparent = pDraw->ucTransparent;
-            if (pDraw->ucDisposalMethod == 2) { // restore to background color
-                uint16_t u16BG = pPal[pDraw->ucBackground];
-                while (s < pEnd) {
-                    c = *s++;
-                    if (c != ucTransparent) {
-                        *d++ = pPal[c];
-                        *d8++ = c;
-                    } else {
-                        *d++ = u16BG; // transparent pixel is restored to background color
-                        *d8++ = pDraw->ucBackground;
+            if (pDraw->ucDisposalMethod == 2) {
+                // Make an attempt to do disposal method 2 (restore to background color)
+                // even though we can't touch pixels outside of the current frame size.
+                // (the previous frame may be larger or in a different position)
+                if (!pPage->pFrameBuffer) {
+                    uint16_t u16BG = pPal[pDraw->ucBackground];
+                    while (s < pEnd) {
+                        c = *s++;
+                        if (c != ucTransparent) {
+                            *d++ = pPal[c];
+                            *d8++ = c;
+                        } else {
+                            *d++ = u16BG; // transparent pixel is restored to background color
+                            *d8++ = pDraw->ucBackground;
+                        }
                     }
                 }
             } else { // no disposal, just write non-transparent pixels
@@ -1252,7 +1272,7 @@ init_codetable:
                else
                   gd.y = gd.y * 8;
             }
-            gd.ucDisposalMethod = (pImage->ucGIFBits & 0x1c)>>2;
+            pImage->ucDisposalMethod = gd.ucDisposalMethod = (pImage->ucGIFBits & 0x1c)>>2;
             gd.ucTransparent = pImage->ucTransparent;
             gd.ucHasTransparency = pImage->ucGIFBits & 1;
             gd.ucBackground = pImage->ucBackground;
@@ -1347,7 +1367,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
                else
                   gd.y = gd.y * 8;
             }
-            gd.ucDisposalMethod = (pPage->ucGIFBits & 0x1c)>>2;
+            pPage->ucDisposalMethod = gd.ucDisposalMethod = (pPage->ucGIFBits & 0x1c)>>2;
             gd.ucTransparent = pPage->ucTransparent;
             gd.ucHasTransparency = pPage->ucGIFBits & 1;
             gd.ucBackground = pPage->ucBackground;
@@ -1433,6 +1453,30 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
         pImage->iError = GIF_INVALID_PARAMETER;
         return 1; // indicate a problem
     }
+    // If we're generating fully 'cooked' output we can support disposal method 2
+    // This requires that we know the size and position of the last frame so that we can
+    // 'dispose' of it by filling it with the background color
+    if (pImage->ucDrawType == GIF_DRAW_COOKED && pImage->pFrameBuffer) {
+        // cooked output with a framebuffer
+        if (pImage->ucPrevDisp == 2) {
+            uint8_t *pActivePalette;
+            uint16_t *pPal, u16BG, *d16;
+            pActivePalette = (pImage->bUseLocalPalette) ? (uint8_t *)pImage->pLocalPalette : (uint8_t *)pImage->pPalette;
+            pPal = (uint16_t *)pActivePalette;
+            c = pImage->ucBackground;
+            for (int y=pImage->iPrevY; y < pImage->iPrevH + pImage->iPrevY; y++) {
+                p = &pImage->pFrameBuffer[(y * pImage->iCanvasWidth) + pImage->iPrevX];
+                memset(p, c, pImage->iPrevW); // restore 8-bit image to background color
+                if (pImage->ucPaletteType == GIF_PALETTE_RGB565_LE || pImage->ucPaletteType == GIF_PALETTE_RGB565_BE) {
+                    u16BG = pPal[c];
+                    d16 = (uint16_t *)&pImage->pFrameBuffer[(pImage->iCanvasWidth * pImage->iCanvasHeight) + (y * pImage->iCanvasWidth*2) + (pImage->iPrevX * 2)];
+                    for (i=0; i<pImage->iPrevW; i++) {
+                        d16[i] = u16BG;
+                    }
+                }
+            }
+        }
+    }
     p = pImage->ucLZW; // un-chunked LZW data
     sMask = 0xffff << (pImage->ucCodeStart + 1);
     sMask = 0xffff - sMask;
@@ -1494,6 +1538,16 @@ init_codetable:
             oldcode = code;
         }
     } /* while not end of LZW code stream */
+    if (pImage->ucDisposalMethod == 2) {
+        // Save this info because we need to dispose of this frame area the next time
+        // through the decoder. Disposal method 2 says to erase the 'previous' frame to
+        // the background color, so we need to save it's size and position
+        pImage->iPrevW = pImage->iWidth;
+        pImage->iPrevH = pImage->iHeight;
+        pImage->iPrevX = pImage->iX;
+        pImage->iPrevY = pImage->iY;
+        pImage->ucPrevDisp = pImage->ucDisposalMethod;
+    }
     return 0;
 //gif_forced_error:
 //    free(pImage->pPixels);
