@@ -8,7 +8,7 @@ libAnimatedGIF.a: AnimatedGIF.o
 	sudo cp libAnimatedGIF.a /usr/local/lib ;\
 	sudo cp ../src/AnimatedGIF.h /usr/local/include
 
-AnimatedGIF.o: ../src/AnimatedGIF.cpp ../src/AnimatedGIF.h
+AnimatedGIF.o: ../src/AnimatedGIF.cpp ../src/AnimatedGIF.h ../src/gif.inl
 	$(CXX) $(CFLAGS) ../src/AnimatedGIF.cpp
 
 clean:

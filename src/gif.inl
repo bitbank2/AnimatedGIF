@@ -1538,8 +1538,8 @@ init_codetable:
         pImage->iPrevH = pImage->iHeight;
         pImage->iPrevX = pImage->iX;
         pImage->iPrevY = pImage->iY;
-        pImage->ucPrevDisp = pImage->ucDisposalMethod;
     }
+    pImage->ucPrevDisp = pImage->ucDisposalMethod;
     return 0;
 //gif_forced_error:
 //    free(pImage->pPixels);
