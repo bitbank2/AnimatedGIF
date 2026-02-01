@@ -5,6 +5,12 @@
 #include <AnimatedGIF.h>
 AnimatedGIF gif;
 
+//#define PIXEL_TYPE LITTLE_ENDIAN_PIXELS
+//#define BITS_PER_PIXEL 16
+
+#define PIXEL_TYPE GIF_PALETTE_RGB8888
+#define BITS_PER_PIXEL 32
+
 int main(int argc, char *argv[])
 {
     SDL_Window *win;
@@ -17,7 +23,7 @@ int main(int argc, char *argv[])
         printf("sdl2 gif player\nUsage: sdl2_gif <filename>\n");
         return -1;
     }
-    gif.begin(LITTLE_ENDIAN_PIXELS);
+    gif.begin(PIXEL_TYPE);
     rc = gif.open(argv[1], NULL);
     if (!rc) {
     	printf("Error opening %s = %d\n", argv[1], gif.getLastError());
@@ -30,7 +36,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    pFrameBuf = (uint8_t *)malloc(w * h * 3); // 8-bit frame + 16-bit frame
+    pFrameBuf = (uint8_t *)malloc(w * h * ((BITS_PER_PIXEL/8)+1)); // 8-bit frame + 16-bit or 32-bit frame
     gif.setFrameBuf(pFrameBuf);
     gif.setDrawType(GIF_DRAW_COOKED);
 
@@ -40,7 +46,11 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
     // Create a surface to hold the GIF canvas
+#if BITS_PER_PIXEL == 16
     canvas = SDL_CreateRGBSurfaceWithFormat(0, w, h, 16, SDL_PIXELFORMAT_RGB565);
+#else
+    canvas = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ABGR8888);
+#endif
     if (canvas == nullptr) {
         printf("SDL_CreateSurface error %s\n", SDL_GetError());
         SDL_DestroyWindow(win);

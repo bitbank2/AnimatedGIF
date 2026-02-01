@@ -975,16 +975,43 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                 // Make an attempt to do disposal method 2 (restore to background color)
                 // even though we can't touch pixels outside of the current frame size.
                 // (the previous frame may be larger or in a different position)
-                uint16_t u16BG = pPal[pDraw->ucBackground];
+                uint8_t * bg = &pPal[pDraw->ucBackground * 3];
+                if (pDraw->ucPaletteType == GIF_PALETTE_RGB888) {
                 while (s < pEnd) {
-                    c = *s++;
-                    if (c != ucTransparent) {
-                        *d++ = pPal[c];
-                        *d8++ = c;
+                    pixel = *s++;
+                    if (pixel != ucTransparent) {
+                        *d8++ = pixel;
+                        d[0] = pPal[(pixel * 3) + 0];
+                        d[1] = pPal[(pixel * 3) + 1];
+                        d[2] = pPal[(pixel * 3) + 2];
+                        d += 3;
                     } else {
-                        *d++ = u16BG; // transparent pixel is restored to background color
                         *d8++ = pDraw->ucBackground;
+                        d[0] = bg[0];
+                        d[1] = bg[1];
+                        d[2] = bg[2];
+                        d += 3;
                     }
+                } // while
+                } else { // must be RGB8888
+                while (s < pEnd) {
+                    pixel = *s++;
+                    if (pixel != ucTransparent) {
+                        *d8++ = pixel;
+                        d[0] = pPal[(pixel * 3) + 0];
+                        d[1] = pPal[(pixel * 3) + 1];
+                        d[2] = pPal[(pixel * 3) + 2];
+                        d[3] = 0xff;
+                        d += 4;
+                    } else {
+                        *d8++ = pDraw->ucBackground;
+                        d[0] = bg[0];
+                        d[1] = bg[1];
+                        d[2] = bg[2];
+                        d[3] = 0xff;
+                        d += 4;
+                    }
+                } // while
                 }
             } else { // no disposal, just write non-transparent pixels
                 if (pPage->ucPaletteType == GIF_PALETTE_RGB888) {
