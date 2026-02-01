@@ -306,7 +306,12 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
         if (p[10] & 0x80) // global color table?
         { // by default, convert to byte-reversed RGB565 for immediate use
             // Read enough additional data for the color table
-            iBytesRead += (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], 3*(1<<iColorTableBits));
+            i = (*pPage->pfnRead)(&pPage->GIFFile, &pPage->ucFileBuf[iBytesRead], 3*(1<<iColorTableBits));
+            iBytesRead += i;
+            if (iColorTableBits != 1 && i < 3*(1<<iColorTableBits)) { // file too small
+                pPage->iError = GIF_BAD_FILE;
+                return 0;
+            }
             if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE) {
                 for (i=0; i<(1<<iColorTableBits); i++) {
                     uint16_t usRGB565;
@@ -404,6 +409,11 @@ static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly)
                         c = p[iOffset++]; /* Block length */
                         if ((iBytesRead - iOffset) < (c+32)) // need to read more data first
                         {
+                            if ((iBytesRead - iOffset) < 0) {
+                                // Something went wrong; invalid block length?
+                                pPage->iError = GIF_DECODE_ERROR;
+                                return 0;
+                            }
                             memmove(pPage->ucFileBuf, &pPage->ucFileBuf[iOffset], (iBytesRead-iOffset)); // move existing data down
                             iBytesRead -= iOffset;
                             iStartPos += iOffset;

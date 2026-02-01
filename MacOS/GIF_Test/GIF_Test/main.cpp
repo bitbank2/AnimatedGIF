@@ -11,7 +11,50 @@
 // test images
 #include "../../../test_images/earth_128x128.h"
 #include "../../../test_images/green.h"
-
+// You can disable the fuzz tests to speed up the testing
+#define RUN_FUZZ_TESTS
+// buffer overflow?
+const uint8_t malicious_gif1[] = {
+    0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xF7, 0x00, 0x00, 0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00,
+    0x00, 0x2C, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF,
+    0x00, 0x02, 0x4C, 0x01, 0x00, 0x3B
+};
+// integer overflow? (dimensions)
+const uint8_t malicious_gif2[] = {
+     0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0xFF, 0xFF, 0xFF, 0xFF,  // Width and height set to max
+     0xF7, 0x00, 0x00, 0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00,
+     0x00, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+     0x00, 0x02, 0x4C, 0x01, 0x00, 0x3B
+ };
+// out of bounds color table
+const uint8_t malicious_gif3[] = {
+      0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00,
+      0x87, 0x00, 0x00,  // Declares 128 colors (128*3=384 bytes needed)
+      0x00, 0x00, 0x00,  // But only provides 3 bytes instead of 384
+      0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2C, 0x00,
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x4C,
+      0x01, 0x00, 0x3B
+  };
+// block length failure
+const uint8_t malicious_gif4[] = {
+       0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00,
+       0x00, 0x00, 0x00, 0x21, 0xFE, 0xFF,  // Comment extension claiming 255 bytes
+       0x41, 0x41, 0x41, 0x00,  // But only providing 3 bytes + null terminator
+       0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2C, 0x00,
+       0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x4C,
+       0x01, 0x00, 0x3B
+   };
+// frame processing bug
+const uint8_t malicious_gif5[] = {
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x02, 0x00, 0x02, 0x00,
+        0x80, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+        0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2C, 0x00,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x4C,
+        0x01, 0x00, 0x21, 0xF9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x2C, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x01, 0x00, 0x00,  // Malformed frame coordinates
+        0x02, 0x4C, 0x01, 0x00, 0x3B
+    };
 AnimatedGIF gif; // static instance of GIF class
 uint32_t u32Pixel;
 //
@@ -51,7 +94,7 @@ int main(int argc, const char * argv[]) {
     uint8_t *pFrameBuffer;
     const char *szStart = " - START";
 
-    iTotalPass = iTotalFail = iTotal++;
+    iTotalPass = iTotalFail = iTotal = 0;
     // Test 1 - Decode a file to completion
     szTestName = (char *)"GIF full file decode";
     iTotal++;
@@ -134,6 +177,7 @@ int main(int argc, const char * argv[]) {
             GIFLOG(__LINE__, szTestName, " - FAILED");
         }
     } else {
+        iTotalFail++;
         GIFLOG(__LINE__, szTestName, "Error opening GIF file.");
     }
     // Test 5 - Verify cooked pixel format 1
@@ -226,7 +270,8 @@ int main(int argc, const char * argv[]) {
     } else {
         GIFLOG(__LINE__, szTestName, "Error opening GIF file.");
     }
-    // FUZZ testing
+#ifdef RUN_FUZZ_TESTS
+    // Test 9 - FUZZ testing
     // Randomize the input data (file header and compressed data) and confirm that the library returns an error code
     // and doesn't have an invalid pointer exception
     printf("Begin fuzz testing...\n");
@@ -250,7 +295,7 @@ int main(int argc, const char * argv[]) {
     GIFLOG(__LINE__, szTestName, " - PASSED");
     iTotalPass++;
     
-    // Fuzz test part 2 - multi-byte random corruption
+    // Test 10 - Fuzz test part 2 - multi-byte random corruption
     szTestName = (char *)"Multi-Byte Random Corruption Test";
     iTotal++;
     GIFLOG(__LINE__, szTestName, szStart);
@@ -272,8 +317,69 @@ int main(int argc, const char * argv[]) {
     } // for each test
     GIFLOG(__LINE__, szTestName, " - PASSED");
     iTotalPass++;
-    
     free(pFuzzData);
+#endif // RUN_FUZZ_TESTS
+    
+    // Test 11 - Malicious file #1
+    szTestName = (char *)"Malicious GIF 1 - Buffer overflow";
+    iTotal++;
+    GIFLOG(__LINE__, szTestName, szStart);
+    if (!gif.open((uint8_t *)malicious_gif1, sizeof(malicious_gif1), GIFDraw)) {
+        // The file is invalid and shouldn't open successfully
+        iTotalPass++;
+        GIFLOG(__LINE__, szTestName, " - PASSED");
+    } else {
+        iTotalFail++;
+        GIFLOG(__LINE__, szTestName, " - FAILED");
+    }
+    // Test 12 - Malicious file #2
+    szTestName = (char *)"Malicious GIF 2 - Invalid Dimensions";
+    iTotal++;
+    GIFLOG(__LINE__, szTestName, szStart);
+    if (!gif.open((uint8_t *)malicious_gif2, sizeof(malicious_gif2), GIFDraw)) {
+        // The file is invalid and shouldn't open successfully
+        iTotalPass++;
+        GIFLOG(__LINE__, szTestName, " - PASSED");
+    } else {
+        iTotalFail++;
+        GIFLOG(__LINE__, szTestName, " - FAILED");
+    }
+    // Test 13 - Malicious file #3
+    szTestName = (char *)"Malicious GIF 3 - Bad color table";
+    iTotal++;
+    GIFLOG(__LINE__, szTestName, szStart);
+    if (!gif.open((uint8_t *)malicious_gif3, sizeof(malicious_gif3), GIFDraw)) {
+        // The file is invalid and shouldn't open successfully
+        iTotalPass++;
+        GIFLOG(__LINE__, szTestName, " - PASSED");
+    } else {
+        iTotalFail++;
+        GIFLOG(__LINE__, szTestName, " - FAILED");
+    }
+    // Test 14 - Malicious file #4
+    szTestName = (char *)"Malicious GIF 4 - Block length failure";
+    iTotal++;
+    GIFLOG(__LINE__, szTestName, szStart);
+    if (!gif.open((uint8_t *)malicious_gif4, sizeof(malicious_gif4), GIFDraw)) {
+        // The file is invalid and shouldn't open successfully
+        iTotalPass++;
+        GIFLOG(__LINE__, szTestName, " - PASSED");
+    } else {
+        iTotalFail++;
+        GIFLOG(__LINE__, szTestName, " - FAILED");
+    }
+    // Test 15 - Malicious file #5
+    szTestName = (char *)"Malicious GIF 5 - Invalid frame position";
+    iTotal++;
+    GIFLOG(__LINE__, szTestName, szStart);
+    if (!gif.open((uint8_t *)malicious_gif5, sizeof(malicious_gif5), GIFDraw)) {
+        // The file is invalid and shouldn't open successfully
+        iTotalPass++;
+        GIFLOG(__LINE__, szTestName, " - PASSED");
+    } else {
+        iTotalFail++;
+        GIFLOG(__LINE__, szTestName, " - FAILED");
+    }
     printf("Total tests: %d, %d passed, %d failed\n", iTotal, iTotalPass, iTotalFail);
 
     return 0;
