@@ -253,12 +253,22 @@ void AnimatedGIF::reset()
 
 void AnimatedGIF::begin(unsigned char ucPaletteType)
 {
+uint8_t *p;
+uint32_t u32;
+
     memset(&_gif, 0, sizeof(_gif));
     if (ucPaletteType != GIF_PALETTE_RGB565_LE && ucPaletteType != GIF_PALETTE_RGB565_BE && ucPaletteType != GIF_PALETTE_RGB888)
         _gif.iError = GIF_INVALID_PARAMETER;
     _gif.ucPaletteType = ucPaletteType;
     _gif.ucDrawType = GIF_DRAW_RAW; // assume RAW pixel handling
     _gif.pFrameBuffer = NULL;
+    p = &_gif.ucLineBuf[0];
+    u32 = (intptr_t)p;
+    u32 &= 15; // align on 16-byte boundary
+    if (u32 > 0) {
+        p += (16-u32);
+    }
+    _gif.pLineBufAligned = p;
 } /* begin() */
 //
 // Play a single frame

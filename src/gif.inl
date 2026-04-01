@@ -1326,7 +1326,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
     //   iPixCount = 0;
     pEnd = pPage->ucFileBuf;
     s = pEnd + FILE_BUF_SIZE; /* Pixels will come out in reversed order */
-    buf = pPage->ucLineBuf + (pPage->iWidth - pPage->iXCount);
+    buf = pPage->pLineBufAligned + (pPage->iWidth - pPage->iXCount);
     giftabs = pPage->usGIFTable;
     gifpels = &pPage->ucGIFPixels[PIXEL_LAST];
     while (code < LINK_UNUSED)
@@ -1378,7 +1378,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
             gd.iY = pPage->iY;
             gd.iWidth = pPage->iWidth;
             gd.iHeight = pPage->iHeight;
-            gd.pPixels = pPage->ucLineBuf;
+            gd.pPixels = pPage->pLineBufAligned;
             gd.pPalette = (pPage->bUseLocalPalette) ? pPage->pLocalPalette : pPage->pPalette;
             gd.pPalette24 = (uint8_t *)gd.pPalette; // just cast the pointer for RGB888
             gd.ucIsGlobalPalette = pPage->bUseLocalPalette==1?0:1;
@@ -1439,7 +1439,7 @@ static void GIFMakePels(GIFIMAGE *pPage, unsigned int code)
                 (*pPage->pfnDraw)(&gd); // callback to handle this line
             }
             pPage->iYCount--;
-            buf = pPage->ucLineBuf;
+            buf = pPage->pLineBufAligned;
             if (pPage->iLZWOff >= LZW_HIGHWATER)
                 GIFGetMoreData(pPage); // We need to read more LZW data
         }
