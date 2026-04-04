@@ -36,7 +36,7 @@
 // The destination pointer can be unaligned
 //
 //                                       A2            A3            A4                          A5
-// Call as void s3_merge_transparent(uint8_t *pSrc, uint8_t *pDest, uint8_t *pTransparent, uint32_t u32Len);
+// Call as void s3_merge_transparent(uint8_t *pSrc, uint8_t *pDest, uint8_t *pTransparent, int iLen);
   s3_merge_transparent:
     # no idea what this frequency keyword does
 #    .frequency 1.000 0.000

@@ -24,6 +24,10 @@
 #define memcpy_P memcpy
 #pragma GCC optimize("O2")
 #endif
+#if (__ARM_ARCH >= 7) || defined(__arm64__) || defined(__aarch64__)
+#include <arm_neon.h>
+#define HAS_NEON
+#endif 
 
 static const unsigned char cGIFBits[9] = {1,4,4,4,8,8,8,8,8}; // convert odd bpp values to ones we can handle
 
@@ -91,7 +95,6 @@ void GIF_reset(GIFIMAGE *pGIF)
 {
     (*pGIF->pfnSeek)(&pGIF->GIFFile, 0);
 } /* GIF_reset() */
-
 //
 // Return value:
 // 1 = good decode, more frames exist
@@ -1071,6 +1074,57 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
         } // opaque
     }
 } /* DrawCooked() */
+#if defined (ARDUINO_ESP32S3_DEV) && !defined(NO_SIMD)
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
+void s3_merge_transparent(uint8_t *pSrc, uint8_t *pDst, uint8_t *ucTrans, int iLen);
+#ifdef __cplusplus
+}
+#endif // __cplusplus
+#endif // ESP32S3 SIMD
+//
+// Merge transparent pixels of a new line of image into the existing framebuffer
+//
+// This function is SIMD-optimized on CPUs which support SIMD instructions
+// SIMD instructions are well suited to speed up this operation since they
+// include compare instructions which allow merging of transparent pixels without
+// the use of branching.
+//
+void GIF_mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t ucTrans, int iLen)
+{
+#if defined (HAS_NEON) && !defined(NO_SIMD)
+    uint8x16_t u8x16_src, u8x16_dst, u8x16_mask;
+    const u8x16_trans = vdupq_n_u8(ucTrans);
+    while (iLen >= 16) {
+        u8x16_src = vld1q_u8(pSrc);
+        u8x16_dst = vld1q_u8(pDst);
+        pSrc += 16;
+        u8x16_mask = vcmeq_u8(u8x16_src, u8x16_dst);
+        u8x16_dst = vandq_u8(u8x16_dst, u8x16_mask); // preserve original pixels
+        u8x16_src = vbicq_u8(u8x16_src, u8x16_mask); // preserve opaque src pixels
+        u8x16_dst = vorrq_u8(u8x16_src, u8x16_dst); // combine everything
+        vst1q_u8(pDst, u8x16_dst); // store final pixels
+        pDst += 16;
+        iLen -= 16;
+    }
+    // Fall through to the generic C code for the 'tail' bytes
+#endif // Arm NEON
+
+#if defined (ARDUINO_ESP32S3_DEV) && !defined(NO_SIMD)
+    s3_merge_transparent(pSrc, pDst, &ucTrans, iLen);
+    return;
+#endif // ESP32S3
+
+// Generic C version
+    for (int i=0; i<iLen; i++) {
+        uint8_t c = *pSrc++;
+        if (c != ucTrans) {
+            *pDst = c;
+        }
+        pDst++;
+    } // for i
+} /* GIF_mergeTransparent() */
 
 //
 // Handle transparent pixels and disposal method
@@ -1079,23 +1133,18 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
 static void DrawNewPixels(GIFIMAGE *pPage, GIFDRAW *pDraw)
 {
     uint8_t *d, *s;
-    int x, iPitch = pPage->iCanvasWidth;
+    int iPitch = pPage->iCanvasWidth;
 
     s = pDraw->pPixels;
     d = &pPage->pFrameBuffer[pDraw->iX + (pDraw->y + pDraw->iY)  * iPitch]; // dest pointer in our complete canvas buffer
     
     // Apply the new pixels to the main image
     if (pDraw->ucHasTransparency) { // if transparency used
-        uint8_t c, ucTransparent = pDraw->ucTransparent;
+        uint8_t ucTransparent = pDraw->ucTransparent;
         if (pDraw->ucDisposalMethod == 2) {
             memset(d, pDraw->ucBackground, pDraw->iWidth); // start with background color
         }
-        for (x=0; x<pDraw->iWidth; x++) {
-            c = *s++;
-            if (c != ucTransparent)
-                *d = c;
-            d++;
-        }
+        GIF_mergeTransparent(s, d, ucTransparent, pDraw->iWidth);
     } else { // disposal method doesn't matter when there aren't any transparent pixels
         memcpy(d, s, pDraw->iWidth); // just overwrite the old pixels
     }
@@ -1206,7 +1255,7 @@ uint16_t *pLengths;
     GIFGetMoreData(pImage); // Read some data to start
     codestart = pImage->ucCodeStart;
     iColors = 1 << codestart;
-    sMask = -1 << (codestart+1);
+    sMask = 0xffffffff << (codestart+1);
     sMask = 0xffffffff - sMask;
     cc = (sMask >> 1) + 1; /* Clear code */
     eoi = cc + 1;
@@ -1225,7 +1274,7 @@ uint16_t *pLengths;
    }
 init_codetable:
    codesize = codestart + 1;
-   sMask = -1 << (codestart+1);
+   sMask = 0xffffffff << (codestart+1);
    sMask = 0xffffffff - sMask;
    nextcode = cc + 2;
    nextlim = (1 << codesize);

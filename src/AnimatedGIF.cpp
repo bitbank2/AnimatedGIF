@@ -53,6 +53,10 @@ int AnimatedGIF::openFLASH(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfn
     return GIFInit(&_gif);
 } /* openFLASH() */
 #endif
+void AnimatedGIF::mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t u8Trans, int iLen)
+{
+   GIF_mergeTransparent(pSrc, pDst, u8Trans, iLen);
+} /* mergeTransparent() */
 //
 // Returns the first comment block found (if any)
 //

@@ -32,7 +32,6 @@ uint16_t  __attribute__((aligned(16))) u16Pixels[400];
 uint32_t __attribute__((aligned(16))) u32Palette[256];
 
 extern "C" {
-  void s3_merge_transparent(uint8_t *pSrc, uint8_t *pDest, uint8_t *pTransparent, uint32_t u32Len);
   void s3_palette_lookup(uint8_t *pSrc, uint16_t *pDest, uint32_t *pPalette, uint32_t u32Len);
 }
 
@@ -88,7 +87,7 @@ int x, y, iWidth;
           d++;
       } // for x
 #else
-      s3_merge_transparent(s, d, &ucTransparent, iWidth);
+      gif.mergeTransparent(s, d, ucTransparent, iWidth);
 #endif
     } else { // no transparent pixels
       memcpy(d, s, iWidth); // just copy
@@ -114,8 +113,8 @@ void setup() {
   Serial.begin(115200);
   delay(3000);
   Serial.println("Starting...");
-
-   lcd.begin(DISPLAY_WS_AMOLED_18); // ESP32-S3 w/368x448 QSPI AMOLED
+   lcd.begin(DISPLAY_LILYGO_T_DECK_PLUS);
+//   lcd.begin(DISPLAY_WS_AMOLED_18); // ESP32-S3 w/368x448 QSPI AMOLED
    lcd.fillScreen(TFT_BLACK);
    gif.begin(BIG_ENDIAN_PIXELS);
    if (gif.open((uint8_t*)simpson_family_320x240, sizeof(simpson_family_320x240), GIFDraw)) {

@@ -251,6 +251,7 @@ class AnimatedGIF
     int getInfo(GIFINFO *pInfo);
     int getLastError();
     int getComment(char *destBuffer);
+    void mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t u8Trans, int iLen);
 
   private:
     GIFIMAGE _gif;
@@ -269,6 +270,7 @@ class AnimatedGIF
     int GIF_getInfo(GIFIMAGE *pGIF, GIFINFO *pInfo);
     int GIF_getLastError(GIFIMAGE *pGIF);
     int GIF_getLoopCount(GIFIMAGE *pGIF);
+    void GIF_mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t ucTrans, int iLen);
 #endif // __cplusplus
 
 #if (INTPTR_MAX == INT64_MAX)
