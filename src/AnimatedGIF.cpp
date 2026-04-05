@@ -53,10 +53,15 @@ int AnimatedGIF::openFLASH(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfn
     return GIFInit(&_gif);
 } /* openFLASH() */
 #endif
-void AnimatedGIF::mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t u8Trans, int iLen)
+void AnimatedGIF::mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t ucTrans, int iLen) 
 {
-   GIF_mergeTransparent(pSrc, pDst, u8Trans, iLen);
+   GIF_mergeTransparent(pSrc, pDst, ucTrans, iLen);
 } /* mergeTransparent() */
+
+void AnimatedGIF::cookPixels(uint8_t *pSrc, uint8_t *pDst, int iTrans, int iLen, uint32_t *pPalette, uint16_t *pRGB565)
+{
+   GIF_cookPixels(pSrc, pDst, iTrans, iLen, pPalette, pRGB565);
+} /* cookPixels() */
 //
 // Returns the first comment block found (if any)
 //
@@ -82,7 +87,11 @@ int AnimatedGIF::allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
         // Allocate a little extra space for the current line
         // as RGB565 or RGB888
         int iCanvasSize = _gif.iCanvasWidth * (_gif.iCanvasHeight+3);
-        _gif.pFrameBuffer = (unsigned char *)(*pfnAlloc)(iCanvasSize);
+        if (pfnAlloc == nullptr) {
+            _gif.pFrameBuffer = (unsigned char *)malloc(iCanvasSize);
+        } else {
+            _gif.pFrameBuffer = (unsigned char *)(*pfnAlloc)(iCanvasSize);
+        }
         if (_gif.pFrameBuffer == NULL)
             return GIF_ERROR_MEMORY;
         return GIF_SUCCESS;
@@ -100,7 +109,11 @@ int AnimatedGIF::allocTurboBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
         // Allocate a little extra space for the current line
         // as RGB565 or RGB888
         int iTurboSize = TURBO_BUFFER_SIZE + (_gif.iCanvasWidth * _gif.iCanvasHeight);
-        _gif.pTurboBuffer = (unsigned char *)(*pfnAlloc)(iTurboSize);
+        if (pfnAlloc == nullptr) {
+            _gif.pTurboBuffer = (unsigned char *)malloc(iTurboSize);
+        } else {
+            _gif.pTurboBuffer = (unsigned char *)(*pfnAlloc)(iTurboSize);
+        }
         if (_gif.pTurboBuffer == NULL)
             return GIF_ERROR_MEMORY;
         return GIF_SUCCESS;

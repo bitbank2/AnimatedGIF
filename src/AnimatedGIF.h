@@ -237,8 +237,8 @@ class AnimatedGIF
     int getFrameHeight();
     int getFrameXOff();
     int getFrameYOff();
-    int allocTurboBuf(GIF_ALLOC_CALLBACK *pfnAlloc);
-    int allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc);
+    int allocTurboBuf(GIF_ALLOC_CALLBACK *pfnAlloc = nullptr);
+    int allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc = nullptr);
     void setTurboBuf(void *pTurboBuffer);
     void setFrameBuf(void *pFrameBuffer);
     int setDrawType(int iType);
@@ -251,7 +251,8 @@ class AnimatedGIF
     int getInfo(GIFINFO *pInfo);
     int getLastError();
     int getComment(char *destBuffer);
-    void mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t u8Trans, int iLen);
+    void mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t ucTrans, int iLen);
+    void cookPixels(uint8_t *pSrc, uint8_t *pDst, int iTrans, int iLen, uint32_t *pPalette, uint16_t *pRGB565);
 
   private:
     GIFIMAGE _gif;
@@ -271,6 +272,7 @@ class AnimatedGIF
     int GIF_getLastError(GIFIMAGE *pGIF);
     int GIF_getLoopCount(GIFIMAGE *pGIF);
     void GIF_mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t ucTrans, int iLen);
+    void GIF_cookPixels(uint8_t *pSrc, uint8_t *pDst, int iTrans, int iLen, uint32_t *pPalette, uint16_t *pRGB565);
 #endif // __cplusplus
 
 #if (INTPTR_MAX == INT64_MAX)

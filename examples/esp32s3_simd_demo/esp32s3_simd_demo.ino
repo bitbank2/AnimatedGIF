@@ -31,10 +31,7 @@ uint8_t *pFrameBuf;
 uint16_t  __attribute__((aligned(16))) u16Pixels[400];
 uint32_t __attribute__((aligned(16))) u32Palette[256];
 
-extern "C" {
-  void s3_palette_lookup(uint8_t *pSrc, uint16_t *pDest, uint32_t *pPalette, uint32_t u32Len);
-}
-
+//#define OLD_WAY
 //
 // GIF callback function
 //
@@ -76,9 +73,9 @@ int x, y, iWidth;
     // Apply the new pixels to the main image
     s = pDraw->pPixels;
     d = &pFrameBuf[(y * w) + pDraw->iX]; // apply new pixels here
+#ifdef OLD_WAY
     if (pDraw->ucHasTransparency) { // if transparency used
       ucTransparent = pDraw->ucTransparent;
-#ifdef OLD_WAY
       for (x=0; x < iWidth; x++) {
           c = *s++;
           if (c != ucTransparent) {
@@ -86,21 +83,17 @@ int x, y, iWidth;
           }
           d++;
       } // for x
-#else
-      gif.mergeTransparent(s, d, ucTransparent, iWidth);
-#endif
     } else { // no transparent pixels
       memcpy(d, s, iWidth); // just copy
     }
     // Convert the current line through the palette and display it
     s = &pFrameBuf[(y * w) + pDraw->iX];
     d16 = u16Pixels;
-#ifdef OLD_WAY
     for (x=0; x<iWidth; x++) {
       *d16++ = usPalette[*s++];
     }
 #else
-    s3_palette_lookup(s, d16, u32Palette, iWidth); // -166ms savings
+    gif.cookPixels(s, d, (pDraw->ucHasTransparency) ? pDraw->ucTransparent : -1, iWidth, u32Palette, u16Pixels);
 #endif
     // Push the pixels to the display
     lcd.pushPixels(u16Pixels, iWidth, DRAW_TO_LCD | DRAW_WITH_DMA);
