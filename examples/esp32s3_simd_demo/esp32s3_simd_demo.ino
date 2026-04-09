@@ -18,9 +18,6 @@
 // limitations under the License.
 //===========================================================================
 //
-// Uncomment the OLD_WAY macro definition to measure the speed of the original C code
-//#define OLD_WAY
-
 #include <bb_spi_lcd.h>
 #include <AnimatedGIF.h>
 #include "simpson_family_320x240.h"
@@ -30,8 +27,8 @@ int w, h, xoff, yoff;
 uint8_t *pFrameBuf;
 uint16_t  __attribute__((aligned(16))) u16Pixels[400];
 uint32_t __attribute__((aligned(16))) u32Palette[256];
+bool bUseSIMD;
 
-//#define OLD_WAY
 //
 // GIF callback function
 //
@@ -42,14 +39,15 @@ uint32_t __attribute__((aligned(16))) u32Palette[256];
 //
 void GIFDraw(GIFDRAW *pDraw)
 {
-uint8_t c, *s, *d, ucTransparent;
-uint16_t *d16, *usPalette;
+uint8_t *s, *d;
 int x, y, iWidth;
 
   if (pDraw->y == 0) { // set the memory window when the first line is rendered
      lcd.setAddrWindow(xoff + pDraw->iX, yoff + pDraw->iY, pDraw->iWidth, pDraw->iHeight);
-     for (x=0; x<256; x++) {
-        u32Palette[x] = pDraw->pPalette[x]; // expand 16->32bit entries for SIMD code
+     if (bUseSIMD) {
+      for (x=0; x<256; x++) {
+          u32Palette[x] = pDraw->pPalette[x]; // expand 16->32bit entries for SIMD code
+      }
      }
   }
 
@@ -57,7 +55,6 @@ int x, y, iWidth;
     if (iWidth + pDraw->iX > lcd.width()) {
        iWidth = lcd.width() - pDraw->iX;
     }
-    usPalette = pDraw->pPalette;
     y = pDraw->iY + pDraw->y; // current line
     if (y >= lcd.height() || pDraw->iX >= lcd.width() || iWidth < 1)
        return;
@@ -73,30 +70,33 @@ int x, y, iWidth;
     // Apply the new pixels to the main image
     s = pDraw->pPixels;
     d = &pFrameBuf[(y * w) + pDraw->iX]; // apply new pixels here
-#ifdef OLD_WAY
-    if (pDraw->ucHasTransparency) { // if transparency used
-      ucTransparent = pDraw->ucTransparent;
-      for (x=0; x < iWidth; x++) {
-          c = *s++;
-          if (c != ucTransparent) {
-            *d = c;
-          }
-          d++;
-      } // for x
-    } else { // no transparent pixels
-      memcpy(d, s, iWidth); // just copy
+    if (!bUseSIMD) {
+      if (pDraw->ucHasTransparency) { // if transparency used
+        uint8_t c, ucTransparent;
+        ucTransparent = pDraw->ucTransparent;
+        for (x=0; x < iWidth; x++) {
+            c = *s++;
+            if (c != ucTransparent) {
+              *d = c;
+            }
+            d++;
+        } // for x
+      } else { // no transparent pixels
+        memcpy(d, s, iWidth); // just copy
+      }
+      // Convert the current line through the palette and display it
+      uint16_t *d16, *usPalette;
+      usPalette = pDraw->pPalette;
+      s = &pFrameBuf[(y * w) + pDraw->iX];
+      d16 = u16Pixels;
+      for (x=0; x<iWidth; x++) {
+        *d16++ = usPalette[*s++];
+      }
+    } else { // use ESP32 S3/P4 SIMD
+      gif.cookPixels(s, d, (pDraw->ucHasTransparency) ? pDraw->ucTransparent : -1, iWidth, u32Palette, u16Pixels);
     }
-    // Convert the current line through the palette and display it
-    s = &pFrameBuf[(y * w) + pDraw->iX];
-    d16 = u16Pixels;
-    for (x=0; x<iWidth; x++) {
-      *d16++ = usPalette[*s++];
-    }
-#else
-    gif.cookPixels(s, d, (pDraw->ucHasTransparency) ? pDraw->ucTransparent : -1, iWidth, u32Palette, u16Pixels);
-#endif
     // Push the pixels to the display
-    lcd.pushPixels(u16Pixels, iWidth, DRAW_TO_LCD | DRAW_WITH_DMA);
+   lcd.pushPixels(u16Pixels, iWidth, DRAW_TO_LCD);
 } /* GIFDraw() */
 
 void setup() {
@@ -106,12 +106,13 @@ void setup() {
   Serial.begin(115200);
   delay(3000);
   Serial.println("Starting...");
-   lcd.begin(DISPLAY_LILYGO_T_DECK_PLUS);
+   lcd.begin(DISPLAY_ELECROW_S3_800x480); //DISPLAY_LILYGO_T_DECK_PLUS);
 //   lcd.begin(DISPLAY_WS_AMOLED_18); // ESP32-S3 w/368x448 QSPI AMOLED
    lcd.fillScreen(TFT_BLACK);
    gif.begin(BIG_ENDIAN_PIXELS);
    if (gif.open((uint8_t*)simpson_family_320x240, sizeof(simpson_family_320x240), GIFDraw)) {
       w = gif.getCanvasWidth(); h = gif.getCanvasHeight();
+      Serial.printf("Opened GIF: %d x %d\n", w, h);
       // Center it on the display
       xoff = (lcd.width() - w)/2;
       yoff = (lcd.height() - h)/2;
@@ -119,17 +120,17 @@ void setup() {
       // You may need to enable PSRAM for the allocation to succeed
       pFrameBuf = (uint8_t*)malloc(w * (h+1));
       // run the animation loop 5 times
-      for (i = 0; i<5; i++) {
+      for (i=0; i<2; i++) {
+        bUseSIMD = i; // first pass scalar, second pass SIMD
         lTime = micros();
         iFrames = 0;
         while (gif.playFrame(false, NULL)){
-  //      Serial.printf("frame %d, size: %d x %d\n", iFrames, gif.getFrameWidth(), gif.getFrameHeight());
           iFrames++;
         }
         lTime = micros() - lTime;
         gif.reset(); // reset to frame 0
+        Serial.printf("total decode time for %d frames = %d us (%s SIMD)\n", iFrames, (int)lTime, bUseSIMD ? "with":"without");
       } // for i
-      Serial.printf("total decode time for %d frames = %d us\n", iFrames, (int)lTime);
    } // if open succeeded
 } /* setup() */
 
