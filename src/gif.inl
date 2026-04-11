@@ -1074,7 +1074,7 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
         } // opaque
     }
 } /* DrawCooked() */
-#if defined (ARDUINO_ESP32S3_DEV) && !defined(NO_SIMD)
+#if (defined (ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32P4_DEV)) && !defined(NO_SIMD)
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -1082,7 +1082,7 @@ void s3_merge_transparent(uint8_t *pSrc, uint8_t *pDst, uint8_t *ucTrans, int iL
 #ifdef __cplusplus
 }
 #endif // __cplusplus
-#endif // ESP32S3 SIMD
+#endif // ESP32S3/P4 SIMD
 //
 // Merge transparent pixels of a new line of image into the existing framebuffer
 //
@@ -1125,7 +1125,7 @@ void GIF_mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t ucTrans, int iLe
 //
 void GIF_cookPixels(uint8_t *pSrc, uint8_t *pDst, int iTrans, int iLen, uint32_t *pPalette, uint16_t *pRGB565)
 {
-#if defined (ARDUINO_ESP32S3_DEV) && !defined(NO_SIMD)
+#if (defined (ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32P4_DEV)) && !defined(NO_SIMD)
     uint8_t ucTrans, *pTrans;
     if (iTrans == -1) {
         pTrans = NULL;
@@ -1135,7 +1135,7 @@ void GIF_cookPixels(uint8_t *pSrc, uint8_t *pDst, int iTrans, int iLen, uint32_t
     }
     s3_merge_transparent(pSrc, pDst, pTrans, iLen, pPalette, pRGB565);
     return;
-#endif // ESP32S3
+#endif // ESP32S3/P4
 
 // Generic C version
 uint16_t *pPal = (uint16_t *)pPalette; // assume 16-bit palette for non-SIMD
