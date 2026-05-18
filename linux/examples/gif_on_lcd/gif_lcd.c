@@ -11,8 +11,8 @@
 #include <unistd.h>
 #include <time.h>
 #include "bb_spi_lcd.h"
-#include "../src/AnimatedGIF.h"
-#include "../src/gif.inl"
+#include "../../src/AnimatedGIF.h"
+#include "../../src/gif.inl"
 
 #define PIMORONI_HAT
 

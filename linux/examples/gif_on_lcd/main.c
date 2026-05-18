@@ -5,10 +5,10 @@
 //  Created by Laurence Bank on 8/2/20.
 //  Copyright © 2020 Laurence Bank. All rights reserved.
 //
-#include "../src/AnimatedGIF.h"
-#include "../src/gif.inl"
+#include "../../../src/AnimatedGIF.h"
+#include "../../../src/gif.inl"
 
-#include "../test_images/badgers.h"
+#include "../../../test_images/badgers.h"
 
 GIFIMAGE gif;
 

@@ -1095,12 +1095,12 @@ void GIF_mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t ucTrans, int iLe
 {
 #if defined (HAS_NEON) && !defined(NO_SIMD)
     uint8x16_t u8x16_src, u8x16_dst, u8x16_mask;
-    const u8x16_trans = vdupq_n_u8(ucTrans);
+    //const uint8x16_t u8x16_trans = vdupq_n_u8(ucTrans);
     while (iLen >= 16) {
         u8x16_src = vld1q_u8(pSrc);
         u8x16_dst = vld1q_u8(pDst);
         pSrc += 16;
-        u8x16_mask = vcmeq_u8(u8x16_src, u8x16_dst);
+        u8x16_mask = vceqq_u8(u8x16_src, u8x16_dst);
         u8x16_dst = vandq_u8(u8x16_dst, u8x16_mask); // preserve original pixels
         u8x16_src = vbicq_u8(u8x16_src, u8x16_mask); // preserve opaque src pixels
         u8x16_dst = vorrq_u8(u8x16_src, u8x16_dst); // combine everything
