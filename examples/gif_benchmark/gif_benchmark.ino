@@ -37,13 +37,18 @@ void setup() {
 void loop() {
 long lTime;
 int iFrames = 0;
+uint8_t *pFrameBuf;
 
   Serial.println("GIF CPU speed benchmark");
-  if (gif.open((uint8_t *)ucBadgers, sizeof(ucBadgers), GIFDraw))
+  if (gif.open((uint8_t *)badgers, sizeof(badgers), GIFDraw))
   {
     Serial.println("Successfully opened GIF, starting test...");
 #ifdef TURBO_MODE
     gif.setTurboBuf(pTurboBuffer);
+#else
+    gif.setDrawType(GIF_DRAW_COOKED);
+    pFrameBuf = (uint8_t *)malloc(gif.getCanvasWidth() * gif.getCanvasHeight() * 3);
+    gif.setFrameBuf(pFrameBuf);
 #endif
     lTime = micros();
     while (gif.playFrame(false, NULL))

@@ -206,6 +206,7 @@ typedef struct gif_image_tag
     unsigned char ucFileBuf[FILE_BUF_SIZE]; // holds temp data and pixel stack
     unsigned short pPalette[(MAX_COLORS * 3)/2]; // can hold RGB565 or RGB888 - set in begin()
     unsigned short pLocalPalette[(MAX_COLORS * 3)/2]; // color palettes for GIF images
+    int iLocalPalSize, iGlobalPalSize;
     uint8_t ucLZW[LZW_BUF_SIZE]; // holds de-chunked LZW data
     // These next 3 are used in Turbo mode to have a larger ucLZW buffer
     uint16_t usGIFTable[1<<MAX_CODE_SIZE];

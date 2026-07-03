@@ -280,7 +280,7 @@ uint32_t u32;
     _gif.ucDrawType = GIF_DRAW_RAW; // assume RAW pixel handling
     _gif.pFrameBuffer = NULL;
     p = &_gif.ucLineBuf[0];
-    u32 = (intptr_t)p;
+    u32 = (uint32_t)(intptr_t)p;
     u32 &= 15; // align on 16-byte boundary
     if (u32 > 0) {
         p += (16-u32);
