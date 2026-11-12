@@ -21,7 +21,7 @@
 // limitations under the License.
 //===========================================================================
 //
-#if defined (ARDUINO_ESP32P4_DEV)
+#if defined (ARDUINO_ESP32P4_DEV) || defined (ARDUINO_ESP32S31_DEV)
     .text
     .align 4
 
@@ -58,8 +58,7 @@ big_chunk_loop:
   esp.orq q0,q0,q4             # combine src+dst pixels
  no_trans1:
   esp.vst.128.ip q0,a1,16      # store 16 finished 8-bit pixels
-  esp.xorq q1,q1,q1            # a register of 0's for zipping
-  esp.vzip.8 q0,q1             # stretch 8bit->16bit data
+  esp.vext.u8 q0,q1,q0         # stretch 8bit->16bit data
 # first 8 pixels
   esp.ldxq.32 q4,q0,a4,0,0     # load Q4:0 with first pixel's color
   esp.ldxq.32 q4,q0,a4,1,1     # load Q4:1 with second pixel's color
@@ -126,8 +125,7 @@ last3_bytes:
  last3_end:
 # Convert and store the last 0-15 RGB565 pixels
 # Prepare 16 pixels since it's easier to not compare/branch the count
-  esp.xorq q3,q3,q3            # a register of 0's for zipping
-  esp.vzip.8 q2,q3             # stretch 8bit->16bit data
+  esp.vext.u8 q2,q3,q2         # stretch 8bit->16bit data
 # first 8 pixels
   esp.ldxq.32 q0,q2,a4,0,0
   esp.ldxq.32 q0,q2,a4,1,1
@@ -193,7 +191,7 @@ big_chunk_unaligned:
   esp.vld.128.ip q2,a1,16      # read next 16 unaligned bytes
 # prepare and store these 16 pixels as RGB565
   esp.xorq q5,q5,q5            # a register of 0's for zipping
-  esp.xorq q4,q0,q0
+  esp.orq q4,q0,q0
   esp.vzip.8 q4,q5             # stretch 8bit->16bit data
 # first 8 pixels
   esp.ldxq.32 q6,q4,a4,0,0     # load Q6:0 with first pixel's color
@@ -226,4 +224,4 @@ big_chunk_unaligned:
   and t1,a3,t0                # leftover count
   bne t1,x0, leftover_unaligned
   ret
-#endif // ESP32P4
+#endif // ESP32P4 / ESP32S31

@@ -1083,7 +1083,7 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
         } // opaque
     }
 } /* DrawCooked() */
-#if (defined (ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32P4_DEV)) && !defined(NO_SIMD)
+#if (defined (ARDUINO_ESP32S31_DEV) || defined (ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32P4_DEV)) && !defined(NO_SIMD)
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -1091,7 +1091,7 @@ void s3_merge_transparent(uint8_t *pSrc, uint8_t *pDst, uint8_t *ucTrans, int iL
 #ifdef __cplusplus
 }
 #endif // __cplusplus
-#endif // ESP32S3/P4 SIMD
+#endif // ESP32S3/P4/S31 SIMD
 //
 // Merge transparent pixels of a new line of image into the existing framebuffer
 //
@@ -1135,7 +1135,7 @@ void GIF_mergeTransparent(uint8_t *pSrc, uint8_t *pDst, uint8_t ucTrans, int iLe
 //
 void GIF_cookPixels(uint8_t *pSrc, uint8_t *pDst, int iTrans, int iLen, uint32_t *pPalette, uint16_t *pRGB565)
 {
-#if (defined (ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32P4_DEV)) && !defined(NO_SIMD)
+#if (defined (ARDUINO_ESP32S31_DEV) || defined (ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32P4_DEV)) && !defined(NO_SIMD)
     uint8_t ucTrans, *pTrans;
     if (iTrans == -1) {
         pTrans = NULL;
@@ -1368,6 +1368,7 @@ init_codetable:
     } // while not end of frame
     if (pImage->ucDrawType == GIF_DRAW_COOKED && pImage->pFrameBuffer) { // convert each line through the palette
         GIFDRAW gd;
+        uint32_t *pPal32 = NULL;
         gd.iX = pImage->iX;
         gd.iY = pImage->iY;
         gd.iWidth = pImage->iWidth;
@@ -1377,6 +1378,16 @@ init_codetable:
         gd.ucIsGlobalPalette = pImage->bUseLocalPalette==1?0:1;
         gd.pUser = pImage->pUser;
         gd.ucPaletteType = pImage->ucPaletteType;
+#if defined(ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32S31_DEV) || defined(ARDUINO_ESP32P4_DEV)
+        if (pImage->ucPaletteType == GIF_PALETTE_RGB565_BE || pImage->ucPaletteType == GIF_PALETTE_RGB565_LE) { // use SIMD to speed up the palette conversion
+            uint16_t *pPal16 = (uint16_t *)gd.pPalette;
+            pPal32 = (uint32_t *)malloc(1024); // 256 max palette entries
+            for (int i=0; i<pImage->iGlobalPalSize; i++) {
+                pPal32[i] = pPal16[i]; // expand 16->32bit entries for SIMD code
+            }
+        }
+
+#endif
         for (int y=0; y<pImage->iHeight; y++) {
             gd.y = y;
             gd.pPixels = &buf[(y * pImage->iWidth)]; // source pixels
@@ -1404,9 +1415,18 @@ init_codetable:
                 (*pImage->pfnDraw)(&gd); // callback to handle this line
             } else if (pImage->pFrameBuffer) {
                 uint16_t *d = (uint16_t *)&pImage->pFrameBuffer[pImage->iCanvasWidth * pImage->iCanvasHeight];
-                DrawCooked(pImage, &gd, &d[((gd.y + gd.iY) * pImage->iCanvasWidth) + gd.iX]);
+                d += ((gd.y + gd.iY) * pImage->iCanvasWidth) + gd.iX;
+                if (pPal32) {
+#if defined (ARDUINO_ESP32S3_DEV) || defined (ARDUINO_ESP32P4_DEV) || defined(ARDUINO_ESP32S31_DEV)
+                    uint8_t *d8 = &pImage->pFrameBuffer[gd.iX + (gd.iY + gd.y) * pImage->iCanvasWidth];
+                    GIF_cookPixels(gd.pPixels, d8, (pImage->ucGIFBits & 1) ? pImage->ucTransparent : -1, gd.iWidth, pPal32, d);
+#endif
+                } else {
+                    DrawCooked(pImage, &gd, d);
+                }
             }
         }
+        if (pPal32) free(pPal32);
     }
     return iErr;
 } /* DecodeLZWTurbo() */

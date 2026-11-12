@@ -59,6 +59,7 @@ class GIFPlayer
     int play(int x, int y, bool bDelay);
     int close();
 protected:
+    uint8_t *_pTurboBuffer;
     AnimatedGIF _gif;
 };
 
@@ -181,11 +182,20 @@ int GIFPlayer::openData(BB_SPI_LCD *pLCD, const void *pData, int iDataSize)
     void *pBuf;
     _gif.begin(GIF_PALETTE_RGB565_BE);
     if (_gif.open((uint8_t *)pData, iDataSize, NULL)) {
-        pBuf = ps_malloc(_gif.getCanvasWidth() * _gif.getCanvasHeight() * 3);
-        if (!pBuf) {
-            return GIF_ERROR_MEMORY;
-        }
-        _gif.setFrameBuf(pBuf);
+// If the device has PSRAM, use it to enable TURBO mode
+        if (psramFound()) {
+            _pTurboBuffer = (uint8_t *)heap_caps_aligned_alloc(16, TURBO_BUFFER_SIZE + (_gif.getCanvasWidth() * _gif.getCanvasHeight()), /*MALLOC_CAP_8BIT*/ MALLOC_CAP_SPIRAM);
+            _gif.setTurboBuf(_pTurboBuffer);
+            pBuf = heap_caps_aligned_alloc(16, _gif.getCanvasWidth() * _gif.getCanvasHeight() * 2, /*MALLOC_CAP_8BIT*/ MALLOC_CAP_SPIRAM);
+            _gif.setFrameBuf(pBuf);
+        } else { // just allocate a normal framebuffer
+            _pTurboBuffer = nullptr;
+            pBuf = ps_malloc(_gif.getCanvasWidth() * _gif.getCanvasHeight() * 3);
+            if (!pBuf) {
+                return GIF_ERROR_MEMORY;
+            }
+            _gif.setFrameBuf(pBuf);
+        } // has PSRAM
         _gif.setDrawType(GIF_DRAW_COOKED);
     } else {
         return GIF_FILE_NOT_OPEN;
@@ -301,5 +311,9 @@ int GIFPlayer::play(int x, int y, bool bDelay)
 int GIFPlayer::close()
 {
     free(_gif.getFrameBuf());
+    if (_pTurboBuffer) {
+        free(_pTurboBuffer);
+        _pTurboBuffer = nullptr;
+    }
     _gif.close();
 } /* close() */
