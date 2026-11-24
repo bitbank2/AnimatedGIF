@@ -44,7 +44,9 @@ static int GIFSkipExact(GIFIMAGE *g, int n);
 static int GIFGetCommentImpl(GIFIMAGE *pGIF, char *pDest);
 
 static int DecodeLZW(GIFIMAGE *pImage, int iOptions);
+#if !GIF_DISABLE_TURBO
 static int DecodeLZWTurbo(GIFIMAGE *pImage, int iOptions);
+#endif
 static int32_t readMem(GIFFILE *pFile, uint8_t *pBuf, int32_t iLen);
 static int32_t seekMem(GIFFILE *pFile, int32_t iPosition);
 int GIF_getInfo(GIFIMAGE *pPage, GIFINFO *pInfo);
@@ -116,8 +118,13 @@ void GIF_begin(GIFIMAGE *pGIF, unsigned char ucPaletteType)
     uint8_t *p;
     uintptr_t u;
     memset(pGIF, 0, sizeof(GIFIMAGE));
+#if GIF_RGB565_ONLY
+    if (ucPaletteType != GIF_PALETTE_RGB565_LE && ucPaletteType != GIF_PALETTE_RGB565_BE)
+        pGIF->iError = GIF_UNSUPPORTED_FEATURE;
+#else
     if (ucPaletteType > GIF_PALETTE_1BPP_OLED)
         pGIF->iError = GIF_INVALID_PARAMETER;
+#endif
     pGIF->ucPaletteType = ucPaletteType;
     pGIF->ucDrawType = GIF_DRAW_RAW;
     p = &pGIF->ucLineBuf[0];
@@ -151,9 +158,12 @@ int rc;
         pGIF->pUser = pUser;
         if (pGIF->iError == GIF_EMPTY_FRAME) // don't try to decode it
             return 0;
+#if !GIF_DISABLE_TURBO
         if (pGIF->pTurboBuffer) { // the presence of the Turbo buffer indicates Turbo mode
             rc = DecodeLZWTurbo(pGIF, 0);
-        } else {
+        } else
+#endif
+        {
             rc = DecodeLZW(pGIF, 0);
         }
         if (rc != 0) // problem
@@ -345,6 +355,17 @@ static int GIFReadPalette(GIFIMAGE *g, uint16_t *pal, int colors)
         return 0;
     }
     if (!GIFReadExact(g, p, colors * 3)) return 0;
+#if GIF_RGB565_ONLY
+    if (g->ucPaletteType != GIF_PALETTE_RGB565_LE && g->ucPaletteType != GIF_PALETTE_RGB565_BE) {
+        g->iError = GIF_UNSUPPORTED_FEATURE;
+        return 0;
+    }
+    for (i = 0; i < colors; i++) {
+        uint8_t *rgb = p + (i * 3);
+        uint16_t color = (uint16_t)(((rgb[0] >> 3) << 11) | ((rgb[1] >> 2) << 5) | (rgb[2] >> 3));
+        pal[i] = (g->ucPaletteType == GIF_PALETTE_RGB565_BE) ? __builtin_bswap16(color) : color;
+    }
+#else
     for (i = 0; i < colors; i++) {
         uint8_t *rgb = p + (i * 3);
         if (g->ucPaletteType == GIF_PALETTE_RGB565_LE || g->ucPaletteType == GIF_PALETTE_RGB565_BE) {
@@ -357,6 +378,7 @@ static int GIFReadPalette(GIFIMAGE *g, uint16_t *pal, int colors)
     if (g->ucPaletteType == GIF_PALETTE_RGB888 || g->ucPaletteType == GIF_PALETTE_RGB8888) {
         memcpy(pal, p, (size_t)colors * 3);
     }
+#endif
     return 1;
 } /* GIFReadPalette() */
 
@@ -573,8 +595,13 @@ done:
 static int GIFGetMoreData(GIFIMAGE *pPage)
 {
     int iDelta = pPage->iLZWSize - pPage->iLZWOff;
+#if !GIF_DISABLE_TURBO
     int iLZWBufSize = (pPage->pTurboBuffer) ? LZW_BUF_SIZE_TURBO : LZW_BUF_SIZE;
     uint8_t *pLZW = (pPage->pTurboBuffer) ? pPage->ucTurboLZW : pPage->ucLZW;
+#else
+    int iLZWBufSize = LZW_BUF_SIZE;
+    uint8_t *pLZW = pPage->ucLZW;
+#endif
 
     if (iDelta < 0 || iDelta > iLZWBufSize) {
         pPage->iError = GIF_DECODE_ERROR;
@@ -636,6 +663,7 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
     s = pDraw->pPixels; // s points to the newly decoded pixels of this line of the current frame
     pEnd = s + pDraw->iWidth; // faster way to loop over the source pixels - eliminates a counter variable
     
+#if !GIF_RGB565_ONLY
     if (pPage->ucPaletteType == GIF_PALETTE_1BPP || pPage->ucPaletteType == GIF_PALETTE_1BPP_OLED) { // 1-bit mono
         uint8_t *d = NULL;
         uint8_t *pPal = pActivePalette;
@@ -762,7 +790,9 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                  }
              }
          }
-    } else if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE) {
+    } else
+#endif
+    if (pPage->ucPaletteType == GIF_PALETTE_RGB565_LE || pPage->ucPaletteType == GIF_PALETTE_RGB565_BE) {
         uint8_t *d = (uint8_t *)pDest;
         uint16_t *pPal = (uint16_t *)pActivePalette;
         if (pDraw->ucHasTransparency) {
@@ -798,7 +828,9 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
                 d += 2;
             }
         }
-    } else { // 24bpp or 32bpp
+    }
+#if !GIF_RGB565_ONLY
+    else { // 24bpp or 32bpp
         uint8_t pixel, *d, *pPal;
         int x;
         d = (uint8_t *)pDest;
@@ -894,6 +926,7 @@ static void DrawCooked(GIFIMAGE *pPage, GIFDRAW *pDraw, void *pDest)
             }
         } // opaque
     }
+#endif
 } /* DrawCooked() */
 #if (defined (ARDUINO_ESP32S31_DEV) || defined (ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32P4_DEV)) && !defined(NO_SIMD)
 #ifdef __cplusplus
@@ -1013,7 +1046,11 @@ static inline int GIFReadCode(GIFIMAGE *pImage, uint32_t *pulBits, uint8_t *pucB
     uint32_t bits = *pulBits;
     uint8_t cnt = *pucBitCount;
     if (cnt < iCodeSize) {
+#if !GIF_DISABLE_TURBO
         uint8_t *pLZW = (pImage->pTurboBuffer) ? pImage->ucTurboLZW : pImage->ucLZW;
+#else
+        uint8_t *pLZW = pImage->ucLZW;
+#endif
         do {
             if (pImage->iLZWOff >= pImage->iLZWSize) {
                 if (pImage->bEndOfFrame || !GIFGetMoreData(pImage) || pImage->iLZWOff >= pImage->iLZWSize) {
@@ -1031,6 +1068,7 @@ static inline int GIFReadCode(GIFIMAGE *pImage, uint32_t *pulBits, uint8_t *pucB
     return 1;
 } /* GIFReadCode() */
 
+#if !GIF_DISABLE_TURBO
 //
 // LZWCopyBytes
 //
@@ -1254,6 +1292,7 @@ turbo_done:
     }
     return GIF_SUCCESS;
 } /* DecodeLZWTurbo() */
+#endif // !GIF_DISABLE_TURBO
 
 //
 // GIFEmitPixels: emit a contiguous run of decoded 8-bit pixel indices to line buffer / display / framebuffer
@@ -1306,13 +1345,14 @@ static void GIFEmitPixels(GIFIMAGE *pPage, const uint8_t *s, int iPixCount)
                 if (pPage->ucDrawType == GIF_DRAW_COOKED) {
                     if (!pPage->pfnDraw) {
                         switch (pPage->ucPaletteType) {
-                            case GIF_PALETTE_1BPP:
-                                iPitch = (pPage->iCanvasWidth + 7) / 8;
-                                break;
                             case GIF_PALETTE_RGB565_BE:
                             case GIF_PALETTE_RGB565_LE:
                                 iPitch = (pPage->iCanvasWidth * 2);
                                 iBpp = 2;
+                                break;
+#if !GIF_RGB565_ONLY
+                            case GIF_PALETTE_1BPP:
+                                iPitch = (pPage->iCanvasWidth + 7) / 8;
                                 break;
                             case GIF_PALETTE_RGB888:
                                 iPitch = pPage->iCanvasWidth * 3;
@@ -1322,6 +1362,7 @@ static void GIFEmitPixels(GIFIMAGE *pPage, const uint8_t *s, int iPixCount)
                                 iPitch = pPage->iCanvasWidth * 4;
                                 iBpp = 4;
                                 break;
+#endif
                         }
                         iOffset += (iBpp * pPage->iX) + ((gd.y + pPage->iY) * iPitch);
                     }
@@ -1341,12 +1382,155 @@ static void GIFEmitPixels(GIFIMAGE *pPage, const uint8_t *s, int iPixCount)
 } /* GIFEmitPixels() */
 
 //
+// Compact dictionary accessors (GIF_DICT_MODE: 0=standard, 16=16-bit prefix, 12=packed 12-bit prefix)
+//
+#if GIF_DICT_MODE == 12
+static inline uint16_t GIFGetPrefix(const GIFIMAGE *g, unsigned int code)
+{
+    unsigned int pair = (code >> 1) * 3U;
+    if ((code & 1U) == 0U) {
+        return (uint16_t)(g->ucGIFPrefix12[pair] | ((uint16_t)(g->ucGIFPrefix12[pair + 1U] & 0x0FU) << 8));
+    } else {
+        return (uint16_t)((g->ucGIFPrefix12[pair + 1U] >> 4) | ((uint16_t)g->ucGIFPrefix12[pair + 2U] << 4));
+    }
+}
+static inline void GIFSetPrefix(GIFIMAGE *g, unsigned int code, uint16_t val)
+{
+    unsigned int pair = (code >> 1) * 3U;
+    if ((code & 1U) == 0U) {
+        g->ucGIFPrefix12[pair] = (uint8_t)(val & 0xFFU);
+        g->ucGIFPrefix12[pair + 1U] = (uint8_t)((g->ucGIFPrefix12[pair + 1U] & 0xF0U) | ((val >> 8) & 0x0FU));
+    } else {
+        g->ucGIFPrefix12[pair + 1U] = (uint8_t)((g->ucGIFPrefix12[pair + 1U] & 0x0FU) | ((val & 0x0FU) << 4));
+        g->ucGIFPrefix12[pair + 2U] = (uint8_t)((val >> 4) & 0xFFU);
+    }
+}
+static inline uint8_t GIFGetSuffix(const GIFIMAGE *g, unsigned int code) { return g->ucGIFPixels[code]; }
+static inline void GIFSetSuffix(GIFIMAGE *g, unsigned int code, uint8_t val) { g->ucGIFPixels[code] = val; }
+#elif GIF_DICT_MODE == 16
+static inline uint16_t GIFGetPrefix(const GIFIMAGE *g, unsigned int code) { return g->usGIFTable[code]; }
+static inline void GIFSetPrefix(GIFIMAGE *g, unsigned int code, uint16_t val) { g->usGIFTable[code] = val; }
+static inline uint8_t GIFGetSuffix(const GIFIMAGE *g, unsigned int code) { return g->ucGIFPixels[code]; }
+static inline void GIFSetSuffix(GIFIMAGE *g, unsigned int code, uint8_t val) { g->ucGIFPixels[code] = val; }
+#else
+static inline uint16_t GIFGetPrefix(const GIFIMAGE *g, unsigned int code) { return g->usGIFTable[code]; }
+static inline uint8_t GIFGetSuffix(const GIFIMAGE *g, unsigned int code) { return g->ucGIFPixels[PIXEL_LAST + code]; }
+#endif
+
+//
+// Chunked emission fallback when an LZW chain exceeds FILE_BUF_SIZE (preserves full 12-bit support)
+//
+static int GIFEmitChainChunked(GIFIMAGE *pPage, unsigned int walkCode, unsigned int cur,
+                               unsigned int cc, unsigned int nextcode, int alreadyPopped,
+                               int isKwKwK, uint8_t *pFirstChar)
+{
+    uint8_t *pEnd = pPage->ucFileBuf;
+    int totalWalkLen = alreadyPopped;
+    uint8_t firstChar;
+    int remFromTail;
+
+    while (cur >= cc) {
+        unsigned int link;
+        if (cur >= nextcode || cur <= (cc + 1U) || totalWalkLen >= (1 << MAX_CODE_SIZE)) {
+            pPage->iError = GIF_DECODE_ERROR;
+            return 1;
+        }
+        totalWalkLen++;
+        link = GIFGetPrefix(pPage, cur);
+        if (link >= cur) {
+            pPage->iError = GIF_DECODE_ERROR;
+            return 1;
+        }
+        cur = link;
+    }
+    totalWalkLen++;
+    firstChar = (uint8_t)cur;
+    if (pFirstChar) *pFirstChar = firstChar;
+
+    remFromTail = totalWalkLen;
+    while (remFromTail > 0) {
+        int take = (remFromTail > FILE_BUF_SIZE) ? FILE_BUF_SIZE : remFromTail;
+        int skip = remFromTail - take;
+        unsigned int node = walkCode;
+        uint8_t *dst = pEnd + take;
+        int k;
+        for (k = 0; k < skip; k++) {
+            node = GIFGetPrefix(pPage, node);
+        }
+        for (k = 0; k < take; k++) {
+            if (node < cc) {
+                *(--dst) = (uint8_t)node;
+            } else {
+                *(--dst) = GIFGetSuffix(pPage, node);
+                node = GIFGetPrefix(pPage, node);
+            }
+        }
+        GIFEmitPixels(pPage, pEnd, take);
+        remFromTail -= take;
+    }
+    if (isKwKwK) {
+        GIFEmitPixels(pPage, &firstChar, 1);
+    }
+    return 0;
+} /* GIFEmitChainChunked() */
+
+#if GIF_DICT_MODE != 0
+//
+// GIFExpandAndEmit: compact dictionary expansion without PIXEL_FIRST table.
+// Expands code (or oldcode for KwKwK) in one pass; the root byte at *s gives firstChar.
+//
+static int GIFExpandAndEmit(GIFIMAGE *pPage, unsigned int code, unsigned int oldcode,
+                            unsigned int cc, unsigned int nextcode, uint8_t *pFirstChar)
+{
+    int isKwKwK = (code == nextcode);
+    unsigned int walkCode = isKwKwK ? oldcode : code;
+    unsigned int cur = walkCode;
+    uint8_t *pEnd = pPage->ucFileBuf;
+    uint8_t *s = pEnd + FILE_BUF_SIZE - (isKwKwK ? 1 : 0);
+    uint8_t firstChar;
+    int iPixCount;
+
+    while (cur >= cc) {
+        unsigned int link;
+        if (cur >= nextcode || cur <= (cc + 1U)) {
+            pPage->iError = GIF_DECODE_ERROR;
+            return 1;
+        }
+        if (s == pEnd) {
+            return GIFEmitChainChunked(pPage, walkCode, cur, cc, nextcode,
+                                       FILE_BUF_SIZE - (isKwKwK ? 1 : 0), isKwKwK, pFirstChar);
+        }
+        *(--s) = GIFGetSuffix(pPage, cur);
+        link = GIFGetPrefix(pPage, cur);
+        if (link >= cur) {
+            pPage->iError = GIF_DECODE_ERROR;
+            return 1;
+        }
+        cur = link;
+    }
+    if (s == pEnd) {
+        return GIFEmitChainChunked(pPage, walkCode, cur, cc, nextcode,
+                                   FILE_BUF_SIZE - (isKwKwK ? 1 : 0), isKwKwK, pFirstChar);
+    }
+    firstChar = (uint8_t)cur;
+    *(--s) = firstChar;
+    if (isKwKwK) {
+        pEnd[FILE_BUF_SIZE - 1] = firstChar;
+    }
+    *pFirstChar = firstChar;
+    iPixCount = (int)(intptr_t)(pEnd + FILE_BUF_SIZE - s);
+    GIFEmitPixels(pPage, s, iPixCount);
+    return 0;
+} /* GIFExpandAndEmit() */
+#else
+//
 // GIFMakePels: expand one LZW code and emit pixels; returns 0 on success, 1 on error
 //
 #if GIF_LAZY_RESET
 static int GIFMakePels(GIFIMAGE *pPage, unsigned int code, unsigned int cc, unsigned int nextcode)
 {
     int iPixCount;
+    unsigned int walkCode = code;
     unsigned short *giftabs;
     unsigned char *s, *pEnd, *gifpels;
 
@@ -1357,9 +1541,12 @@ static int GIFMakePels(GIFIMAGE *pPage, unsigned int code, unsigned int cc, unsi
 
     while (code >= cc) {
         unsigned int link;
-        if (code >= nextcode || code <= (cc + 1U) || s == pEnd) {
+        if (code >= nextcode || code <= (cc + 1U)) {
             pPage->iError = GIF_DECODE_ERROR;
             return 1;
+        }
+        if (s == pEnd) {
+            return GIFEmitChainChunked(pPage, walkCode, code, cc, nextcode, FILE_BUF_SIZE, 0, NULL);
         }
         *(--s) = gifpels[code];
         link = giftabs[code];
@@ -1370,8 +1557,7 @@ static int GIFMakePels(GIFIMAGE *pPage, unsigned int code, unsigned int cc, unsi
         code = link;
     }
     if (s == pEnd) {
-        pPage->iError = GIF_DECODE_ERROR;
-        return 1;
+        return GIFEmitChainChunked(pPage, walkCode, code, cc, nextcode, FILE_BUF_SIZE, 0, NULL);
     }
     *(--s) = (unsigned char)code;
     iPixCount = (int)(intptr_t)(pEnd + FILE_BUF_SIZE - s);
@@ -1415,6 +1601,7 @@ static int GIFMakePels(GIFIMAGE *pPage, unsigned int code, unsigned int cc, unsi
     return 0;
 } /* GIFMakePels() */
 #endif
+#endif // GIF_DICT_MODE != 0
 
 #define GET_CODE do { \
     if (!GIFReadCode(pImage, &ulBits, &ucBitCount, (int)codesize, (uint16_t)sMask, &code)) return 1; \
@@ -1427,9 +1614,13 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
 {
     int i;
     unsigned short oldcode, codesize, nextcode, nextlim;
-    unsigned short *giftabs, cc, eoi;
+    unsigned short cc, eoi;
     uint16_t sMask;
-    unsigned char c, *gifpels;
+    unsigned char c;
+#if GIF_DICT_MODE == 0
+    unsigned short *giftabs = pImage->usGIFTable;
+    unsigned char *gifpels = pImage->ucGIFPixels;
+#endif
     uint32_t ulBits = 0;
     uint8_t ucBitCount = 0;
     unsigned short code;
@@ -1443,6 +1634,12 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
         pImage->iError = GIF_INVALID_PARAMETER;
         return 1;
     }
+#if GIF_RGB565_ONLY
+    if (pImage->ucPaletteType != GIF_PALETTE_RGB565_LE && pImage->ucPaletteType != GIF_PALETTE_RGB565_BE) {
+        pImage->iError = GIF_UNSUPPORTED_FEATURE;
+        return 1;
+    }
+#endif
     if (pImage->ucDrawType == GIF_DRAW_COOKED && pImage->pFrameBuffer && pImage->ucPrevDisp == 2) {
         uint8_t *pActivePalette = (pImage->bUseLocalPalette) ? (uint8_t *)pImage->pLocalPalette : (uint8_t *)pImage->pPalette;
         uint16_t *pPal = (uint16_t *)pActivePalette;
@@ -1463,14 +1660,13 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
 
     cc = (uint16_t)(1U << pImage->ucCodeStart);
     eoi = (uint16_t)(cc + 1U);
-    giftabs = pImage->usGIFTable;
-    gifpels = pImage->ucGIFPixels;
     pImage->iYCount = pImage->iHeight;
     pImage->iXCount = pImage->iWidth;
     pImage->iLZWOff = 0;
     pImage->iLZWSize = 0;
     if (!GIFGetMoreData(pImage)) return 1;
 
+#if GIF_DICT_MODE == 0
     for (i = 0; i < cc; i++) {
         gifpels[PIXEL_FIRST + i] = (unsigned char)i;
 #if !GIF_LAZY_RESET
@@ -1478,13 +1674,14 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
         giftabs[i] = LINK_END;
 #endif
     }
+#endif
 
 init_codetable:
     codesize = (unsigned short)(pImage->ucCodeStart + 1);
     nextlim = (unsigned short)(1U << codesize);
     sMask = (uint16_t)(nextlim - 1U);
     nextcode = (unsigned short)(cc + 2U);
-#if !GIF_LAZY_RESET
+#if GIF_DICT_MODE == 0 && !GIF_LAZY_RESET
     memset(&giftabs[cc], LINK_UNUSED, sizeof(pImage->usGIFTable) - sizeof(giftabs[0]) * cc);
 #endif
     GET_CODE;
@@ -1498,7 +1695,14 @@ init_codetable:
     }
     c = (unsigned char)code;
     oldcode = code;
+#if GIF_DICT_MODE != 0
+    {
+        uint8_t firstPix = c;
+        GIFEmitPixels(pImage, &firstPix, 1);
+    }
+#else
     if (GIFMakePels(pImage, code, cc, nextcode) != 0) return 1;
+#endif
 
     while (code != eoi && pImage->iYCount > 0) {
         GET_CODE;
@@ -1511,18 +1715,28 @@ init_codetable:
                 pImage->iError = GIF_DECODE_ERROR;
                 return 1;
             }
+#if GIF_DICT_MODE != 0
+            if (GIFExpandAndEmit(pImage, code, oldcode, cc, nextcode, &c) != 0) return 1;
+            if (nextcode < nextlim) {
+                GIFSetPrefix(pImage, nextcode, oldcode);
+                GIFSetSuffix(pImage, nextcode, c);
+            }
+#else
             if (nextcode < nextlim) {
                 giftabs[nextcode] = oldcode;
                 gifpels[PIXEL_FIRST + nextcode] = c;
                 gifpels[PIXEL_LAST + nextcode] = c = gifpels[PIXEL_FIRST + code];
             }
+#endif
             if (nextcode < (1U << MAX_CODE_SIZE)) nextcode++;
             if (nextcode >= nextlim && codesize < MAX_CODE_SIZE) {
                 codesize++;
                 nextlim <<= 1;
                 sMask = (uint16_t)(nextlim - 1U);
             }
+#if GIF_DICT_MODE == 0
             if (GIFMakePels(pImage, code, cc, nextcode) != 0) return 1;
+#endif
             oldcode = code;
         }
     }

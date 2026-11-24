@@ -111,6 +111,11 @@ int AnimatedGIF::allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
 //
 int AnimatedGIF::allocTurboBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
 {
+#if GIF_DISABLE_TURBO
+    (void)pfnAlloc;
+    _gif.iError = GIF_UNSUPPORTED_FEATURE;
+    return GIF_UNSUPPORTED_FEATURE;
+#else
     if (_gif.iCanvasWidth > 0 && _gif.iCanvasHeight > 0 && _gif.pTurboBuffer == NULL)
     {
         uint32_t w = (uint32_t)_gif.iCanvasWidth;
@@ -128,6 +133,7 @@ int AnimatedGIF::allocTurboBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
         return GIF_SUCCESS;
     }
     return GIF_INVALID_PARAMETER;
+#endif
 } /* allocTurboBuf() */
 //
 // Set the frame buffer pointer
@@ -141,7 +147,12 @@ void AnimatedGIF::setFrameBuf(void *pFrameBuf)
 //
 void AnimatedGIF::setTurboBuf(void *pBuf)
 {
+#if GIF_DISABLE_TURBO
+    (void)pBuf;
+    _gif.iError = GIF_UNSUPPORTED_FEATURE;
+#else
     _gif.pTurboBuffer = (uint8_t *)pBuf;
+#endif
 } /* setTurboBuf() */
 //
 // Set the DRAW callback behavior to RAW (default)
@@ -159,6 +170,10 @@ int AnimatedGIF::setDrawType(int iType)
 //
 int AnimatedGIF::freeTurboBuf(GIF_FREE_CALLBACK *pfnFree)
 {
+#if GIF_DISABLE_TURBO
+    (void)pfnFree;
+    return GIF_UNSUPPORTED_FEATURE;
+#else
     if (_gif.pTurboBuffer)
     {
         (*pfnFree)(_gif.pTurboBuffer);
@@ -166,6 +181,7 @@ int AnimatedGIF::freeTurboBuf(GIF_FREE_CALLBACK *pfnFree)
         return GIF_SUCCESS;
     }
     return GIF_INVALID_PARAMETER;
+#endif
 } /* freeTurboBuf() */
 //
 // Release the memory used by the frame buffer
@@ -193,7 +209,11 @@ uint8_t * AnimatedGIF::getFrameBuf()
 //
 uint8_t * AnimatedGIF::getTurboBuf()
 {
+#if GIF_DISABLE_TURBO
+    return NULL;
+#else
     return _gif.pTurboBuffer;
+#endif
 } /* getTurboBuf() */
 
 int AnimatedGIF::getCanvasWidth()
@@ -283,8 +303,13 @@ uint8_t *p;
 uint32_t u32;
 
     memset(&_gif, 0, sizeof(_gif));
+#if GIF_RGB565_ONLY
+    if (ucPaletteType != GIF_PALETTE_RGB565_LE && ucPaletteType != GIF_PALETTE_RGB565_BE)
+        _gif.iError = GIF_UNSUPPORTED_FEATURE;
+#else
     if (ucPaletteType > GIF_PALETTE_1BPP_OLED)
         _gif.iError = GIF_INVALID_PARAMETER;
+#endif
     _gif.ucPaletteType = ucPaletteType;
     _gif.ucDrawType = GIF_DRAW_RAW; // assume RAW pixel handling
     _gif.pFrameBuffer = NULL;
@@ -318,9 +343,12 @@ long lTime = millis();
         _gif.pUser = pUser;
         if (_gif.iError == GIF_EMPTY_FRAME) // don't try to decode it
             return 0;
+#if !GIF_DISABLE_TURBO
         if (_gif.pTurboBuffer) {
             rc = DecodeLZWTurbo(&_gif, 0);
-        } else {
+        } else
+#endif
+        {
             rc = DecodeLZW(&_gif, 0);
         }
         if (rc != 0) // problem

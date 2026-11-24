@@ -78,16 +78,65 @@
 #ifndef GIF_MAX_HEIGHT
 #define GIF_MAX_HEIGHT 32767
 #endif
+
+//
+// LowMem & Experimental Compile-Time Configuration
+//
+// GIF_DICT_MODE:
+//   0  = Standard upstream tables (uint16_t prefix[4096] + uint8_t pixels[8192] = 16384 B)
+//   16 = Compact 16-bit prefix + 8-bit suffix (8192 + 4096 = 12288 B, saves 4096 B)
+//   12 = Packed 12-bit prefix + 8-bit suffix (6144 + 4096 = 10240 B, saves 6144 B)
+#ifndef GIF_DICT_MODE
+#define GIF_DICT_MODE 0
+#endif
+#if GIF_DICT_MODE != 0 && GIF_DICT_MODE != 16 && GIF_DICT_MODE != 12
+#error "GIF_DICT_MODE must be 0, 16, or 12"
+#endif
+
 // Enable lazy dictionary reset (1 = skip memset on Clear Code, 0 = legacy memset)
 #ifndef GIF_LAZY_RESET
 #define GIF_LAZY_RESET 1
 #endif
-#define LZW_BUF_SIZE (6*MAX_CHUNK_SIZE)
-#define LZW_HIGHWATER (4*MAX_CHUNK_SIZE)
-// This buffer is used to store the pixel sequence in reverse order
-// it needs to be large enough to hold the longest possible
-// sequence (1<<MAX_CODE_SIZE)
-#define FILE_BUF_SIZE (1<<MAX_CODE_SIZE)
+#if GIF_DICT_MODE != 0 && !GIF_LAZY_RESET
+#error "Compact dictionary (GIF_DICT_MODE != 0) requires GIF_LAZY_RESET=1"
+#endif
+
+// Palette storage mode (1 = RGB565 LE/BE only, saves 512 B + Flash; 0 = all formats)
+#ifndef GIF_RGB565_ONLY
+#define GIF_RGB565_ONLY 0
+#endif
+
+// De-chunked LZW input buffer size (minimum 260 B to hold at least one 255-byte sub-block)
+#ifndef GIF_LZW_BUF_SIZE
+#define GIF_LZW_BUF_SIZE (6*MAX_CHUNK_SIZE)
+#endif
+#if GIF_LZW_BUF_SIZE < 260
+#error "GIF_LZW_BUF_SIZE must be >= 260"
+#endif
+#define LZW_BUF_SIZE GIF_LZW_BUF_SIZE
+#define LZW_HIGHWATER ((LZW_BUF_SIZE * 2) / 3)
+
+// Pixel expansion / temp buffer size (minimum 768 B for 256-color RGB palette reads;
+// chains longer than FILE_BUF_SIZE fall back to bounded multi-chunk emission)
+#ifndef GIF_FILE_BUF_SIZE
+#define GIF_FILE_BUF_SIZE (1<<MAX_CODE_SIZE)
+#endif
+#if GIF_FILE_BUF_SIZE < 768
+#error "GIF_FILE_BUF_SIZE must be >= 768 (max 256-color RGB palette size)"
+#endif
+#define FILE_BUF_SIZE GIF_FILE_BUF_SIZE
+
+#ifndef GIF_DISABLE_TURBO
+#if (GIF_DICT_MODE != 0) || (GIF_FILE_BUF_SIZE < (1<<MAX_CODE_SIZE)) || (GIF_LZW_BUF_SIZE < (6*MAX_CHUNK_SIZE))
+#define GIF_DISABLE_TURBO 1
+#else
+#define GIF_DISABLE_TURBO 0
+#endif
+#endif
+
+#if !GIF_DISABLE_TURBO && ((GIF_DICT_MODE != 0) || (GIF_FILE_BUF_SIZE < (1<<MAX_CODE_SIZE)) || (GIF_LZW_BUF_SIZE < (6*MAX_CHUNK_SIZE)))
+#error "Turbo mode overlays ucLZW across standard usGIFTable/ucGIFPixels/ucLineBuf; set GIF_DISABLE_TURBO=1 when using LowMem dictionary or smaller buffers."
+#endif
 
 #define PIXEL_FIRST 0
 #define PIXEL_LAST (1<<MAX_CODE_SIZE)
@@ -214,12 +263,20 @@ typedef struct gif_image_tag
     GIFFILE GIFFile;
     void *pUser;
     unsigned char *pFrameBuffer;
+#if !GIF_DISABLE_TURBO
     unsigned char *pTurboBuffer;
+#endif
     unsigned char *pPixels, *pOldPixels;
-    unsigned char ucFileBuf[FILE_BUF_SIZE]; // holds temp data and pixel stack
+    unsigned char ucFileBuf[FILE_BUF_SIZE]; // holds temp data and pixel expansion stack
+#if GIF_RGB565_ONLY
+    uint16_t pPalette[MAX_COLORS];
+    uint16_t pLocalPalette[MAX_COLORS];
+#else
     unsigned short pPalette[(MAX_COLORS * 3)/2]; // can hold RGB565 or RGB888 - set in begin()
     unsigned short pLocalPalette[(MAX_COLORS * 3)/2]; // color palettes for GIF images
+#endif
     int iLocalPalSize, iGlobalPalSize;
+#if !GIF_DISABLE_TURBO
     union {
         struct {
             uint8_t ucLZW[LZW_BUF_SIZE]; // holds de-chunked LZW data
@@ -230,6 +287,21 @@ typedef struct gif_image_tag
         };
         uint8_t ucTurboLZW[LZW_BUF_SIZE_TURBO];
     };
+#else
+    uint8_t ucLZW[LZW_BUF_SIZE]; // holds de-chunked LZW data
+#if GIF_DICT_MODE == 0
+    uint16_t usGIFTable[1<<MAX_CODE_SIZE];
+    uint8_t ucGIFPixels[(PIXEL_LAST*2)];
+#elif GIF_DICT_MODE == 16
+    uint16_t usGIFTable[1<<MAX_CODE_SIZE]; // 16-bit prefix table (8192 B)
+    uint8_t ucGIFPixels[1<<MAX_CODE_SIZE]; // 8-bit suffix table (4096 B)
+#elif GIF_DICT_MODE == 12
+    // Packed 12-bit prefix table: 2 entries per 3 bytes (6144 B)
+    uint8_t ucGIFPrefix12[((1<<MAX_CODE_SIZE) * 3 + 1) / 2];
+    uint8_t ucGIFPixels[1<<MAX_CODE_SIZE]; // 8-bit suffix table (4096 B)
+#endif
+    uint8_t ucLineBuf[MAX_WIDTH+15]; // current line
+#endif
     uint8_t *pLineBufAligned;
 } GIFIMAGE;
 
