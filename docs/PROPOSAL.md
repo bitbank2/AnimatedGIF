@@ -68,13 +68,17 @@ O reset deve restaurar a largura inicial, a máscara, `nextcode = cc + 2`, `next
 
 ### Pontos de investigação
 
-- `GIFMakePels()`: o limite `LINK_UNUSED` (5911) é superior à capacidade física do dicionário padrão (4096). Verificar cadeias inválidas e validar limites físicos e lógicos antes de acessar tabelas. (Confirmado no upstream `17a6a2ed`: `code` entre 4096 e 5910 causa leitura fora dos limites em `giftabs`/`gifpels`, reproduzível com ASan).
-- `GIFGetMoreData()`: verificar os retornos de `pfnRead`, inclusive leituras parciais (fazendo loop enquanto retornar `> 0`), EOF (`0`) e erros (`<= 0`); nunca contabilizar bytes não lidos em `iLZWSize`.
-- Leitor de bits (`GET_CODE` / `GET_CODE_TURBO`): garantir que exista informação suficiente para cada código e para cada leitura de palavra, inclusive nas bordas dos buffers, eliminando leituras de 4/8 bytes além do fim de `ucLZW`.
+- `GIFMakePels()`: o limite `LINK_UNUSED` (5911) é superior à capacidade física do dicionário padrão (4096). Verificar cadeias inválidas e validar limites físicos e lógicos antes de acessar tabelas. (Reproduzido empiricamente no upstream `17a6a2ed` com ASan: `code` entre 4096 e 5910 causa `global-buffer-overflow` em `giftabs`/`gifpels`; além disso, `allocFrameBuf()` usando `w*(h+3)` com `COOKED` + `disposal=2` disparou `heap-buffer-overflow` em `gif.inl:1620`.)
+- `GIFGetMoreData()`: verificar os retornos de `pfnRead`, inclusive leituras parciais (fazendo loop enquanto retornar `> 0`), EOF (`0`) e erros (`<= 0`); nunca contabilizar bytes não lidos em `iLZWSize`. (No upstream `17a6a2ed`, callback retornando 1 byte por chamada — `CB_1BYTE` — falhou com `err=6`.)
+- Leitor de bits (`GET_CODE` / `GET_CODE_TURBO`): garantir que exista informação suficiente para cada código e para cada leitura de palavra, inclusive nas bordas dos buffers, eliminando leituras de 4/8 bytes além do fim de `ucLZW` e acessos `uint64_t`/`uint16_t` desalinhados detectados por UBSan em `17a6a2ed`.
 - Propagar falhas de expansão em vez de retornar silenciosamente de `GIFMakePels()`.
 - Validar dimensões, offsets e operações de tamanho de alocação (`allocFrameBuf`, `allocTurboBuf`) com aritmética verificada.
 - Fazer `nextcode` saturar quando o dicionário estiver cheio (`1 << MAX_CODE_SIZE`); testar fluxos com Clear Code diferido.
-- **Achados adicionais na validação estática:** `GIFParseInfo()`, `GIF_getInfo()` e `getComment()` no upstream também executam leituras e indexações sem verificação de limites (especialmente com arquivos truncados, sub-blocos malformados e `iSize` inconsistente); no upstream, `DecodeLZW()` também não drena sub-blocos restantes ao encerrar por `iYCount == 0` antes do `EOI`, dessincronizando quadros seguintes.
+- **Achados adicionais reproduzidos no upstream `17a6a2ed`:**
+  - `GIFParseInfo()` (`gif.inl:318`) rejeitava GIFs válidos menores que ~267 bytes com 4+ cores (`edge_small_1x1_2bit.gif` falhou com `err=8`);
+  - `cGIFBits[b[0]]` (`gif.inl:525`) indexava fora dos limites com valor 255 sob UBSan;
+  - 10 arquivos sintéticos malformados de LZW/paleta retornavam `err=0` silenciosamente;
+  - `GIF_getInfo()` e `getComment()` executavam leituras sem verificação completa de limites e `DecodeLZW()` não drenava sub-blocos restantes ao encerrar por `iYCount == 0` antes do `EOI`.
 
 ### Testes
 
@@ -131,26 +135,77 @@ Plataformas validadas nesta etapa: ESP8266 (`esp8266:esp8266 3.1.2` via `arduino
 | Responsividade | Maior intervalo único em decodificação cooperativa (`decodeStep` / `decodeLines`) |
 | Correção | Hash FNV-1a pixel-a-pixel contra o upstream `17a6a2ed` + fuzzing ASan/UBSan |
 
-### Metas experimentais
+### Resultados empíricos (v1 experimental)
 
-- Reduzir a memória do dicionário em 4–6 KiB.
-- Investigar consumo total de buffers de 12–16 KiB com otimizações adicionais (mantendo 12 bits completos).
-- Preservar suporte a códigos de 12 bits e comportamento da API existente.
-- Não introduzir regressões de pixels nos recursos suportados.
-- Quantificar qualquer penalidade de velocidade e ganho de responsividade.
+#### 1. Memória e Flash no ESP8266 (`arduino-cli`)
+
+Compilado para `esp8266:esp8266:generic:eesz=4M2M,xtal=160,ip=lm2n` via [`tests/esp8266_measure.ps1`](../tests/esp8266_measure.ps1) (no ESP8266, `MAX_WIDTH` padrão é `480` em `src/AnimatedGIF.h` quando não sobrescrito):
+
+| Perfil / Flags | `sizeof(AnimatedGIF)` | Delta vs Upstream | `DRAM` (`DATA+RODATA+BSS`) | `IRAM` | `IROM` (Flash) | `.bin` |
+|---|---:|---:|---:|---:|---:|---:|
+| Upstream (`17a6a2ed`) | 24172 B | — | 52228 B (`49792` BSS) | 26979 B | 232292 B | 265856 B |
+| `GIF_PROFILE_FAST` (padrão) | 24172 B | 0 B | 52232 B (`49792` BSS) | 26979 B | 232548 B | 266112 B |
+| `GIF_PROFILE_BALANCED` | 15980 B | -8192 B (-33,9%) | 44040 B (`41600` BSS) | 26979 B | 231108 B | 264672 B |
+| `GIF_PROFILE_MINIMAL` | 13164 B | -11008 B (-45,5%) | 41224 B (`38784` BSS) | 26979 B | 230260 B | 263824 B |
+| `GIF_PROFILE_MINIMAL -DMAX_WIDTH=240` | 12924 B | -11248 B (-46,5%) | 40984 B (`38544` BSS) | 26979 B | 230260 B | 263824 B |
+| `GIF_PROFILE_COOPERATIVE` | 16000 B | -8172 B (-33,8%) | 44064 B (`41624` BSS) | 26991 B | 231396 B | 264976 B |
+| `GIF_PROFILE_MINIMAL -DGIF_ENABLE_COOPERATIVE=1` | 13184 B | -10988 B (-45,5%) | 41248 B (`38808` BSS) | 26991 B | 230548 B | 264128 B |
+
+> O endurecimento completo do perfil `FAST` adicionou `0 B` em `sizeof(AnimatedGIF)` e `0 B` em `BSS`, com apenas `+256 B` em `IROM` e `+4 B` em `RODATA`.
+
+#### 2. Desempenho e responsividade no host (`-O2`, x86_64 WSL2, `MAX_WIDTH=2048`)
+
+Comparação aquecida (`tests/bench.cpp`, callback nulo) entre perfis principais:
+
+| Alvo (frames) | `FAST` (25800 B) | `FAST_LAZY0` (25800 B) | `BALANCED` (17600 B) | `MINIMAL` (14784 B) |
+|---|---:|---:|---:|---:|
+| `emb_badgers` (9f) | 2,15 ms (med 216,50 us) | 2,34 ms (med 226,00 us) | 3,11 ms (med 339,40 us) | 4,85 ms (med 515,90 us) |
+| `emb_bw_wiggler` (200f) | 12,91 ms (med 56,50 us) | 13,46 ms (med 52,40 us) | 16,40 ms (med 69,30 us) | 32,32 ms (med 143,90 us) |
+| `emb_earth` (103f) | 38,19 ms (med 353,00 us) | 40,66 ms (med 374,40 us) | 43,14 ms (med 367,90 us) | 49,96 ms (med 472,70 us) |
+| `emb_nostromo` (202f) | 25,46 ms (med 107,10 us) | 40,54 ms (med 148,80 us) | 33,92 ms (med 143,00 us) | 49,15 ms (med 215,00 us) |
+| `emb_thisisfine` (33f) | 22,06 ms (med 609,30 us) | 21,45 ms (med 564,70 us) | 24,13 ms (med 669,50 us) | 39,53 ms (med 1194,80 us) |
+| `valid_deferred_cc` (1f) | 0,82 ms | 1,33 ms | 1,49 ms | 1,46 ms |
+| `valid_multi_cc` (1f) | 0,05 ms | 0,05 ms | 0,05 ms | 0,13 ms |
+| `valid_long_chain` (1f, cadeia 1238 px) | 2,19 ms | 2,30 ms | 4,38 ms | 9,11 ms |
+
+- **Lazy reset isolado (A/B sem alteração estrutural no commit `a077867`):** eliminar o `memset` no Clear Code reduziu o tempo total em `-13,5%` (`emb_bw_wiggler` `6,52 -> 5,64 ms`), `-10,5%` (`emb_badgers` `1,24 -> 1,11 ms`), `-7,9%` (`emb_nostromo` `11,20 -> 10,31 ms`) e `-6,1%` (`emb_earth` `13,83 -> 12,99 ms`).
+- **Varredura de `GIF_LZW_BUF_SIZE` sobre `MINIMAL` (host ocioso, entrada em RAM):** `264 B` (`sizeof=14536`, `emb_earth=44,62 ms`, `emb_bw_wiggler=27,44 ms`, `valid_long_chain=8,74 ms`), `512 B` (`sizeof=14784`, `38,96 ms` / `26,08 ms` / `9,19 ms`) e `1530 B` (`sizeof=15808`, `38,03 ms` / `28,07 ms` / `9,76 ms`). No host em RAM a variação de ~15–30% por agendamento/turbo do WSL2 domina porque callbacks em memória têm custo quase nulo; em flash/LittleFS/SD, buffers maiores reduzem trocas de contexto de I/O.
+- **Limitação de largura (`MAX_WIDTH=240`):** no perfil `MINIMAL_240` (`sizeof=12976` no host), `valid_long_chain.gif` é rejeitado na abertura (`frames=0`) porque sua largura excede `MAX_WIDTH=240`.
+- **Latência cooperativa (`decodeStep(500)`, orçamento de 500 us):**
+
+| Perfil cooperativo | `sizeof` (host 64-bit) | Faixa de `max_step` | `valid_long_chain` `max_step` vs frame completo | `emb_earth` total / `max_step` |
+|---|---:|---:|---:|---:|
+| `GIF_PROFILE_COOPERATIVE` | 17624 B | 47,80–593,40 us | 593,40 us (vs 3605,61 us med) | 30,04 ms / 523,40 us |
+| `GIF_PROFILE_MINIMAL + COOP` | 14808 B | 85,90–621,70 us | 515,90 us (vs 8317,53 us med) | 37,83 ms / 599,80 us |
+
+#### 3. Correção, fuzzing e integração drop-in no `smalltv-pomodoro`
+
+- **Suíte de regressão e fuzzing (`tests/run_tests.sh`):**
+  - `run_tests.sh 50000`: todas as 11 configurações (`fast`, `fast32`, `fast_no_lazy`, `balanced`, `minimal`, `minimal240`, `coop`, `minimal_coop`, `dict16_full`, `dict12_full`, `dict12_lzw264`) passaram com `41 checks, 0 failures` cada (incluindo hashes golden pixel-a-pixel capturados do upstream `17a6a2ed` e leituras parciais de 1 byte por chamada), compilação C99 pura OK e fuzzing ASan+UBSan (`50000` casos em 32 bits `sizeof=14752` + `50000` casos em 64 bits `sizeof=25800`) com `0` falhas (além de `25000` casos no modo cooperativo no commit `28186f0`).
+  - Revalidação pós-ajuste de vendoring no wrapper (`src/AnimatedGIF.cpp`): `run_tests.sh 2000` passou (`ALL TESTS PASSED`, 11 perfis + C99 + `2000`+`2000` fuzzing).
+- **Integração drop-in no [`smalltv-pomodoro`](https://github.com/davicorrea0/smalltv-pomodoro)** (`GIF_PROFILE_MINIMAL` + `MAX_WIDTH 480` via `AnimatedGIF_config.h`, `gif_inl.h` no `src/` do sketch, `album.cpp` inalterado):
+
+| Métrica no `smalltv-pomodoro` | Baseline | Com `AnimatedGIF-LowMem` | Diferença |
+|---|---:|---:|---:|
+| `sizeof(AnimatedGIF)` (32 bits) | 24172 B | 13164 B | **-11008 B (-45,5% por alocação no heap)** |
+| RAM estática (`DATA+RODATA+BSS`) | 38420 B | 38420 B | 0 B (`AnimatedGIF` é alocado sob demanda no heap) |
+| Flash `IROM` | 544340 B | 542692 B | -1648 B |
+| Binário `.bin` / `.bin.gz` | 585248 B / 431538 B | 583600 B / 430287 B | -1648 B / -1251 B |
+| `sim/test-gif.sh` (`ff_240`, `ff_small`, 5 maliciosos) | `81996386`/`53363a1a`, `b2d1cdd0`/`6ac915c3` | Idêntico (bit a bit) | 0 regressões + 200k fuzz ASan OK |
+| `sim/testes.sh` (handlers, telemetria, 5k GIF/JPEG fuzz) | OK | OK | 0 falhas |
 
 ## 10. Roadmap de implementação
 
 - [x] Criar fork separado (`davicorrea0/AnimatedGIF-LowMem`) e fixar commit de referência (`upstream-baseline`).
-- [ ] Criar corpus sintético + regressão golden + harness de fuzzing e benchmark reproduzível.
-- [ ] Validar limites, leituras parciais, `GIF_getInfo()`, `getComment()` e propagação de erros.
-- [ ] Implementar lazy reset e medir isoladamente.
-- [ ] Implementar dicionário prefixo/sufixo de 16 bits e fallback de pilha em blocos.
-- [ ] Implementar prefixos compactados de 12 bits e redução de buffers/paleta.
-- [ ] Implementar decodificação cooperativa opcional.
-- [ ] Comparar estratégias de buffer de entrada e perfis no host e no ESP8266.
-- [ ] Validar integração drop-in no `smalltv-pomodoro`.
-- [ ] Documentar perfis, limitações e benchmarks reais em `README.md` e nesta proposta.
+- [x] Criar corpus sintético + regressão golden + harness de fuzzing e benchmark reproduzível.
+- [x] Validar limites, leituras parciais, `GIF_getInfo()`, `getComment()` e propagação de erros.
+- [x] Implementar lazy reset e medir isoladamente.
+- [x] Implementar dicionário prefixo/sufixo de 16 bits e fallback de pilha em blocos.
+- [x] Implementar prefixos compactados de 12 bits e redução de buffers/paleta.
+- [x] Implementar decodificação cooperativa opcional.
+- [x] Comparar estratégias de buffer de entrada e perfis no host e no ESP8266.
+- [x] Validar integração drop-in no `smalltv-pomodoro`.
+- [x] Documentar perfis, limitações e benchmarks reais em `README.md` e nesta proposta.
 
 ## 11. Referências
 
@@ -160,5 +215,12 @@ Plataformas validadas nesta etapa: ESP8266 (`esp8266:esp8266 3.1.2` via `arduino
 
 ## 12. Status e limitações
 
-- **Commit de referência:** `17a6a2eda4385c14f39ee51adfc89ab721150527`.
-- Esta versão do documento registra a validação estática inicial; os resultados empíricos de compilação, RAM, Flash, fuzzing e benchmark serão adicionados após a execução das etapas experimentais.
+- **Commit de referência:** `17a6a2eda4385c14f39ee51adfc89ab721150527` (tag `upstream-baseline`).
+- **Status v1 experimental:** implementação concluída e verificada no host (GCC ASan/UBSan x86_64/i386 + `-O2`), no ESP8266 (`arduino-cli` `3.1.2`) e na integração drop-in com o `smalltv-pomodoro`.
+- **Limitações conhecidas e compromissos:**
+  - **Turbo vs dicionário compacto:** `GIF_DICT_MODE != 0`, `GIF_FILE_BUF_SIZE < 4096`, `GIF_LZW_BUF_SIZE < 1530` e `GIF_RGB565_ONLY=1` são incompatíveis com o layout contíguo do `DecodeLZWTurbo()` e exigem `GIF_DISABLE_TURBO=1` (protegido por `#error`).
+  - **`GIF_RGB565_ONLY=1`:** economiza `512 B` nas paletas mas recusa `GIF_PALETTE_RGB888`.
+  - **Cadeias longas com `GIF_FILE_BUF_SIZE` reduzido:** cadeias maiores que `768 B` acionam `GIFEmitChainChunked` em múltiplos passos; combinado com prefixos compactados de 12 bits (`MINIMAL`), eleva o tempo em casos sintéticos extremos como `valid_long_chain` (`~2,19 ms -> ~9,11 ms` no host), embora imagens reais típicas mantenham latência moderada e o modo cooperativo limite cada fatia a ~0,5–0,6 ms.
+  - **Orçamento de `decodeStep(budgetUs)`:** é um orçamento cooperativo verificável apenas em fronteiras seguras (entre códigos/linhas), não uma garantia de tempo real em torno de callbacks lentos de SPI/LittleFS/display.
+  - **Vendoring dentro de `sketch/src/` no `arduino-cli`:** a etapa de preparação de sketch do `arduino-cli` pode não copiar arquivos `.inl`; ao copiar para `sketch/src/AnimatedGIF/` (em vez de usar `--library`), renomear `gif.inl` para `gif_inl.h` (o fallback `__has_include` em `src/AnimatedGIF.cpp` resolve automaticamente).
+  - **Compatibilidade com `JPEGDEC.h`:** quando `AnimatedGIF.h` é incluído antes de `JPEGDEC.h` na mesma unidade de compilação (observado no `smalltv-pomodoro`), o compilador emite aviso benigno de redefinição de `INTELSHORT`/`INTELLONG` por `JPEGDEC.h` não usar `#ifndef`.

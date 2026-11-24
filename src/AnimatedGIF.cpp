@@ -20,11 +20,23 @@
 //
 // Modified 2026 in AnimatedGIF-LowMem (https://github.com/davicorrea0/AnimatedGIF-LowMem):
 //   - Input validation, safe allocation arithmetic, checked getComment()
+//   - Compile-time Turbo-disable stubs and optional cooperative incremental API
+//   - Supports both gif.inl (library) and gif_inl.h (sketch src/ vendoring)
 //===========================================================================
 #include "AnimatedGIF.h"
 
 // Here is all of the actual code...
+#if defined(__has_include)
+#if __has_include("gif.inl")
 #include "gif.inl"
+#elif __has_include("gif_inl.h")
+#include "gif_inl.h"
+#else
+#include "gif.inl"
+#endif
+#else
+#include "gif.inl"
+#endif
 
 //
 // Memory initialization

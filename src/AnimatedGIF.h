@@ -27,6 +27,13 @@
 #define PROGMEM
 #endif
 
+// Optional project-local configuration header (ensures consistent ABI across all TUs)
+#ifdef __has_include
+#if __has_include("AnimatedGIF_config.h")
+#include "AnimatedGIF_config.h"
+#endif
+#endif
+
 // Cortex-M4/M7 allow unaligned access to SRAM
 #if defined(HAL_ESP32_HAL_H_) || defined(TEENSYDUINO) || defined(ARM_MATH_CM4) || defined(ARM_MATH_CM7)
 #define ALLOWS_UNALIGNED
@@ -77,6 +84,80 @@
 #endif // MAX_WIDTH
 #ifndef GIF_MAX_HEIGHT
 #define GIF_MAX_HEIGHT 32767
+#endif
+
+//
+// LowMem & Experimental Compile-Time Profiles
+// Define at most one GIF_PROFILE_* macro (individually overridable via #define/-D):
+//   GIF_PROFILE_FAST        (default) Standard upstream tables + Turbo support
+//   GIF_PROFILE_BALANCED    16-bit prefix + 8-bit suffix, FILE_BUF=768, LZW_BUF=768, no Turbo
+//   GIF_PROFILE_MINIMAL     Packed 12-bit prefix + 8-bit suffix, FILE_BUF=768, LZW_BUF=512, RGB565_ONLY, no Turbo
+//   GIF_PROFILE_COOPERATIVE BALANCED defaults + incremental decodeStep()/decodeLines() API
+//
+#if (defined(GIF_PROFILE_FAST) + defined(GIF_PROFILE_BALANCED) + defined(GIF_PROFILE_MINIMAL) + defined(GIF_PROFILE_COOPERATIVE)) > 1
+#error "Define at most one GIF_PROFILE_* preset; combine features with GIF_ENABLE_COOPERATIVE=1 etc."
+#endif
+
+#if defined(GIF_PROFILE_MINIMAL)
+#ifndef GIF_DICT_MODE
+#define GIF_DICT_MODE 12
+#endif
+#ifndef GIF_FILE_BUF_SIZE
+#define GIF_FILE_BUF_SIZE 768
+#endif
+#ifndef GIF_LZW_BUF_SIZE
+#define GIF_LZW_BUF_SIZE 512
+#endif
+#ifndef GIF_RGB565_ONLY
+#define GIF_RGB565_ONLY 1
+#endif
+#ifndef GIF_DISABLE_TURBO
+#define GIF_DISABLE_TURBO 1
+#endif
+#ifndef GIF_LAZY_RESET
+#define GIF_LAZY_RESET 1
+#endif
+#elif defined(GIF_PROFILE_BALANCED)
+#ifndef GIF_DICT_MODE
+#define GIF_DICT_MODE 16
+#endif
+#ifndef GIF_FILE_BUF_SIZE
+#define GIF_FILE_BUF_SIZE 768
+#endif
+#ifndef GIF_LZW_BUF_SIZE
+#define GIF_LZW_BUF_SIZE 768
+#endif
+#ifndef GIF_RGB565_ONLY
+#define GIF_RGB565_ONLY 0
+#endif
+#ifndef GIF_DISABLE_TURBO
+#define GIF_DISABLE_TURBO 1
+#endif
+#ifndef GIF_LAZY_RESET
+#define GIF_LAZY_RESET 1
+#endif
+#elif defined(GIF_PROFILE_COOPERATIVE)
+#ifndef GIF_DICT_MODE
+#define GIF_DICT_MODE 16
+#endif
+#ifndef GIF_FILE_BUF_SIZE
+#define GIF_FILE_BUF_SIZE 768
+#endif
+#ifndef GIF_LZW_BUF_SIZE
+#define GIF_LZW_BUF_SIZE 768
+#endif
+#ifndef GIF_RGB565_ONLY
+#define GIF_RGB565_ONLY 0
+#endif
+#ifndef GIF_DISABLE_TURBO
+#define GIF_DISABLE_TURBO 1
+#endif
+#ifndef GIF_LAZY_RESET
+#define GIF_LAZY_RESET 1
+#endif
+#ifndef GIF_ENABLE_COOPERATIVE
+#define GIF_ENABLE_COOPERATIVE 1
+#endif
 #endif
 
 //

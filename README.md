@@ -1,3 +1,92 @@
+AnimatedGIF-LowMem (Experimental Fork)
+======================================
+
+Experimental fork of [bitbank2/AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) (branched from commit [`17a6a2e`](https://github.com/bitbank2/AnimatedGIF/commit/17a6a2eda4385c14f39ee51adfc89ab721150527), tagged `upstream-baseline`) focused on **low-RAM microcontrollers (ESP8266 / LX106)**, **memory-safety hardening**, and **optional cooperative incremental decoding**, while keeping `GIF_PROFILE_FAST` (default) API- and Turbo-compatible with upstream.
+
+Licensed under Apache-2.0 with original BitBank Software, Inc. copyright and attribution retained; see [docs/PROPOSAL.md](docs/PROPOSAL.md) for the full engineering design and empirical results.
+
+## What Changed vs Upstream
+
+- **Memory-safety & parser hardening**: sequential bounds-checked parser (`GIFParseInfo`), hardened `GIF_getInfo()` / `getComment()`, partial-read I/O loop (`GIFReadExact` / `GIFSkipExact`) supporting 1-byte-at-a-time callbacks, 32-bit bit-accumulator `GIFReadCode` without word over-reads or unaligned UB, `nextcode` saturation on full 12-bit dictionaries (deferred Clear Codes), consecutive Clear Code and `Clear Code -> EOI` handling, sub-block draining before next frame, overflow-safe `allocFrameBuf` / `allocTurboBuf`, and `#error` guard against using Turbo mode with compact layouts.
+- **Lazy dictionary reset (`GIF_LAZY_RESET=1`, default)**: eliminates Clear Code `memset` overhead by validating codes against `nextcode`.
+- **Compact LZW dictionaries (`GIF_DICT_MODE`)**:
+  - `0` (default/`FAST`): upstream dual-table dictionary (`usGIFTable` + `ucGIFPixels`, 16384 B).
+  - `16` (`BALANCED`/`COOPERATIVE`): 16-bit prefix + 8-bit suffix (12288 B, `-4096 B`), reconstructing first pixels cleanly.
+  - `12` (`MINIMAL`): 12-bit packed prefixes (2 entries per 3 bytes) + 8-bit suffix (10240 B, `-6144 B`), preserving **full 12-bit (4096-code) GIF compatibility**.
+- **Buffer & palette tuning**: configurable `GIF_FILE_BUF_SIZE` (down to `768 B`, with multi-pass chunked stack fallback `GIFEmitChainChunked` for chains up to `32767` px), `GIF_LZW_BUF_SIZE` (`1530 B` down to `260 B`), and `GIF_RGB565_ONLY=1` (`1024 B` palettes instead of `1536 B`).
+- **Optional cooperative incremental decoding (`GIF_ENABLE_COOPERATIVE=1`)**: `beginFrame()`, `decodeStep(budgetUs)`, `decodeLines(maxLines)`, and `frameComplete()` (plus C equivalents `GIF_beginFrame`, `GIF_decodeStep`, `GIF_decodeLines`, `GIF_frameComplete`) returning `GIFDecodeStatus` (`GIF_DECODE_MORE`, `GIF_DECODE_FRAME_DONE`, `GIF_DECODE_END`, `GIF_DECODE_ERR`) so callers can yield to Wi-Fi/HTTP/RTOS between steps.
+- **Project-wide config hook**: `AnimatedGIF.h` automatically includes `"AnimatedGIF_config.h"` when present (`__has_include`) so every translation unit shares the exact same `GIFIMAGE` / `AnimatedGIF` ABI.
+
+## Compile-Time Profiles (Measured on ESP8266)
+
+Measured with `arduino-cli` (`esp8266:esp8266:generic:eesz=4M2M,xtal=160,ip=lm2n`, default `MAX_WIDTH=480` on ESP8266 unless overridden):
+
+| Profile / Flags | `sizeof(AnimatedGIF)` | Delta vs Upstream | Static DRAM (`DATA+RODATA+BSS`) | Flash (`IROM`) | Sketch `.bin` |
+|---|---:|---:|---:|---:|---:|
+| Upstream (`17a6a2ed`) | 24,172 B | — | 52,228 B | 232,292 B | 265,856 B |
+| `GIF_PROFILE_FAST` (default) | 24,172 B | 0 B | 52,232 B | 232,548 B | 266,112 B |
+| `GIF_PROFILE_BALANCED` | 15,980 B | -8,192 B (-33.9%) | 44,040 B | 231,108 B | 264,672 B |
+| `GIF_PROFILE_MINIMAL` | 13,164 B | -11,008 B (-45.5%) | 41,224 B | 230,260 B | 263,824 B |
+| `GIF_PROFILE_MINIMAL` + `MAX_WIDTH=240` | 12,924 B | -11,248 B (-46.5%) | 40,984 B | 230,260 B | 263,824 B |
+| `GIF_PROFILE_COOPERATIVE` | 16,000 B | -8,172 B (-33.8%) | 44,064 B | 231,396 B | 264,976 B |
+| `GIF_PROFILE_MINIMAL` + `GIF_ENABLE_COOPERATIVE=1` | 13,184 B | -10,988 B (-45.5%) | 41,248 B | 230,548 B | 264,128 B |
+
+### Configuration (`AnimatedGIF_config.h` & Sketch `src/` Vendoring)
+
+For Arduino/PlatformIO projects (where the library `.cpp` is compiled separately from `.ino`), place an `AnimatedGIF_config.h` in `src/` or an include directory so both your sketch and `AnimatedGIF.cpp` see identical struct sizes:
+
+```cpp
+#pragma once
+#define GIF_PROFILE_MINIMAL
+#define MAX_WIDTH 480
+```
+
+> **Note for sketch `src/` vendoring with `arduino-cli`:** If you copy the source files directly inside `<sketch>/src/AnimatedGIF/` instead of using `--library` / `Arduino/libraries/`, `arduino-cli`'s sketch staging may omit `.inl` files. Rename `gif.inl` to `gif_inl.h` inside `<sketch>/src/AnimatedGIF/` — `AnimatedGIF.cpp` checks `__has_include("gif.inl")` and automatically falls back to `gif_inl.h`. Also note that `GIF_RGB565_ONLY=1` rejects RGB888 palette requests (`GIF_PALETTE_RGB888`), and compact dictionary profiles (`GIF_PROFILE_BALANCED`, `GIF_PROFILE_MINIMAL`, `GIF_PROFILE_COOPERATIVE`) disable Turbo mode (`GIF_DISABLE_TURBO=1`).
+
+## Cooperative Incremental Decoding Example
+
+```cpp
+// Requires -DGIF_PROFILE_COOPERATIVE or -DGIF_ENABLE_COOPERATIVE=1
+int delayMs = 0;
+if (gif.beginFrame(&delayMs)) {
+    GIFDecodeStatus st = GIF_DECODE_MORE;
+    while (!gif.frameComplete()) {
+        st = (GIFDecodeStatus)gif.decodeStep(500); // ~500 us soft budget
+        if (st == GIF_DECODE_ERR || st == GIF_DECODE_END) break;
+        yield(); // service Wi-Fi / HTTP / watchdog
+    }
+}
+```
+
+With a `500 us` step budget under host `-O2` benchmarking (`tests/bench.cpp`), `GIF_PROFILE_COOPERATIVE` kept worst-case single steps at `47.80–593.40 us` (`valid_long_chain` 1238-pixel chain: `593.40 us` max step vs `3605.61 us` full-frame median) and `MINIMAL + COOPERATIVE` kept worst-case single steps at `85.90–621.70 us` (`515.90 us` vs `8317.53 us` full-frame median). Note that `decodeStep(budgetUs)` checks elapsed time (`GIF_MICROS()`) at safe code/line boundaries and treats user I/O and draw callbacks as atomic.
+
+## Downstream Validation (`smalltv-pomodoro`)
+
+Validated as a drop-in replacement inside [`smalltv-pomodoro`](https://github.com/davicorrea0/smalltv-pomodoro) (ESP8266 240x240 display firmware, `GIF_PROFILE_MINIMAL` + `MAX_WIDTH 480` in `AnimatedGIF_config.h`, `gif_inl.h` sketch layout, `album.cpp` unmodified):
+- Heap allocation per GIF (`sizeof(AnimatedGIF)`): `24,172 B -> 13,164 B` (`-11,008 B` / `-45.5%`)
+- ESP8266 firmware `IROM`: `544,340 B -> 542,692 B` (`-1,648 B`); `.bin`: `585,248 B -> 583,600 B`; `.bin.gz`: `431,538 B -> 430,287 B`
+- Pixel-for-pixel regression (`sim/test-gif.sh`): identical frame counts, line counts, and FNV-1a hashes (`ff_240.gif` `framebuffer=81996386` / `all_rows=53363a1a`, `ff_small.gif` `framebuffer=b2d1cdd0` / `all_rows=6ac915c3`), `100,000` RAM + `100,000` callback ASan fuzz cases with `0` failures, and `sim/testes.sh` passing cleanly.
+
+## Running Tests & Benchmarks
+
+```bash
+# Host C++ ASan/UBSan test matrix (11 profiles), C99 build check, and fuzzing (Linux/WSL)
+bash tests/run_tests.sh 50000
+
+# Host -O2 benchmark example
+g++ -O2 -std=c++11 -DGIF_PROFILE_COOPERATIVE tests/bench.cpp -o /tmp/bench
+/tmp/bench COOPERATIVE tests/corpus
+```
+
+```powershell
+# ESP8266 size/RAM measurement via arduino-cli
+.\tests\esp8266_measure.ps1 -ProfileLabel MINIMAL -ExtraFlags "-DGIF_PROFILE_MINIMAL"
+```
+
+---
+
+## Original Upstream README
+
 AnimatedGIF
 ===========
 
