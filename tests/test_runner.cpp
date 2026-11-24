@@ -550,7 +550,7 @@ int main(int argc, char **argv) {
                 char cbuf[128] = {};
                 g.playFrame(false, nullptr, nullptr);
                 int clen = g.getComment(cbuf);
-                if (clen != 41 || strcmp(cbuf, "AnimatedGIF-LowMem test comment 1234567890!") != 0) {
+                if (clen != 43 || strcmp(cbuf, "AnimatedGIF-LowMem test comment 1234567890!") != 0) {
                     fprintf(stderr, "FAIL edge_comment len=%d str='%s'\n", clen, cbuf);
                     failures++;
                 }
