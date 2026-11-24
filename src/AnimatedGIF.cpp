@@ -17,6 +17,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Modified 2026 in AnimatedGIF-LowMem (https://github.com/davicorrea0/AnimatedGIF-LowMem):
+//   - Input validation, safe allocation arithmetic, checked getComment()
 //===========================================================================
 #include "AnimatedGIF.h"
 
@@ -28,6 +31,10 @@
 //
 int AnimatedGIF::open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
 {
+    if (!pData || iDataSize <= 0) {
+        _gif.iError = GIF_INVALID_PARAMETER;
+        return 0;
+    }
     _gif.iError = GIF_SUCCESS;
     _gif.pfnRead = readMem;
     _gif.pfnSeek = seekMem;
@@ -42,6 +49,10 @@ int AnimatedGIF::open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
 #ifdef ARDUINO
 int AnimatedGIF::openFLASH(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw)
 {
+    if (!pData || iDataSize <= 0) {
+        _gif.iError = GIF_INVALID_PARAMETER;
+        return 0;
+    }
     _gif.iError = GIF_SUCCESS;
     _gif.pfnRead = readFLASH;
     _gif.pfnSeek = seekMem;
@@ -67,26 +78,22 @@ void AnimatedGIF::cookPixels(uint8_t *pSrc, uint8_t *pDst, int iTrans, int iLen,
 //
 int AnimatedGIF::getComment(char *pDest)
 {
-int32_t iOldPos;
-
-    iOldPos = _gif.GIFFile.iPos; // keep old position
-    (*_gif.pfnSeek)(&_gif.GIFFile, _gif.iCommentPos);
-    (*_gif.pfnRead)(&_gif.GIFFile, (uint8_t *)pDest, _gif.sCommentLen);
-    (*_gif.pfnSeek)(&_gif.GIFFile, iOldPos);
-    pDest[_gif.sCommentLen] = 0; // zero terminate the string
-    return (int)_gif.sCommentLen;
+    return GIFGetCommentImpl(&_gif, pDest);
 } /* getComment() */
 
-//  
+//
 // Allocate a block of memory to hold the entire canvas (as 8-bpp)
 //
 int AnimatedGIF::allocFrameBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
 {
     if (_gif.iCanvasWidth > 0 && _gif.iCanvasHeight > 0 && _gif.pFrameBuffer == NULL)
     {
-        // Allocate a little extra space for the current line
-        // as RGB565 or RGB888
-        int iCanvasSize = _gif.iCanvasWidth * (_gif.iCanvasHeight+3);
+        // Overflow-safe canvas size calculation: width * (height + 3)
+        uint32_t w = (uint32_t)_gif.iCanvasWidth;
+        uint32_t h = (uint32_t)_gif.iCanvasHeight + 3U;
+        if (w > (uint32_t)INT32_MAX / h)
+            return GIF_INVALID_PARAMETER;
+        uint32_t iCanvasSize = w * h;
         if (pfnAlloc == nullptr) {
             _gif.pFrameBuffer = (unsigned char *)malloc(iCanvasSize);
         } else {
@@ -106,9 +113,11 @@ int AnimatedGIF::allocTurboBuf(GIF_ALLOC_CALLBACK *pfnAlloc)
 {
     if (_gif.iCanvasWidth > 0 && _gif.iCanvasHeight > 0 && _gif.pTurboBuffer == NULL)
     {
-        // Allocate a little extra space for the current line
-        // as RGB565 or RGB888
-        int iTurboSize = TURBO_BUFFER_SIZE + (_gif.iCanvasWidth * _gif.iCanvasHeight);
+        uint32_t w = (uint32_t)_gif.iCanvasWidth;
+        uint32_t h = (uint32_t)_gif.iCanvasHeight;
+        if (w > ((uint32_t)INT32_MAX - (uint32_t)TURBO_BUFFER_SIZE) / h)
+            return GIF_INVALID_PARAMETER;
+        uint32_t iTurboSize = (uint32_t)TURBO_BUFFER_SIZE + (w * h);
         if (pfnAlloc == nullptr) {
             _gif.pTurboBuffer = (unsigned char *)malloc(iTurboSize);
         } else {
@@ -274,7 +283,7 @@ uint8_t *p;
 uint32_t u32;
 
     memset(&_gif, 0, sizeof(_gif));
-    if (ucPaletteType != GIF_PALETTE_RGB565_LE && ucPaletteType != GIF_PALETTE_RGB565_BE && ucPaletteType != GIF_PALETTE_RGB888)
+    if (ucPaletteType > GIF_PALETTE_1BPP_OLED)
         _gif.iError = GIF_INVALID_PARAMETER;
     _gif.ucPaletteType = ucPaletteType;
     _gif.ucDrawType = GIF_DRAW_RAW; // assume RAW pixel handling

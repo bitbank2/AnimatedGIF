@@ -8,6 +8,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Modified 2026 in AnimatedGIF-LowMem (https://github.com/davicorrea0/AnimatedGIF-LowMem):
+//   - Hardened sequential parser, bounds-checked I/O/LZW decoding, UB-free unaligned reads
+//   - Optional LowMem dictionary/buffer/cooperative profiles (forthcoming commits)
 //===========================================================================
 
 #ifndef __ANIMATEDGIF__
@@ -64,11 +68,16 @@
 #define MAX_CODE_SIZE 12
 
 #define MAX_COLORS 256
+#ifndef MAX_WIDTH
 #ifdef __LINUX__
 #define MAX_WIDTH 2048
 #else
 #define MAX_WIDTH 480
 #endif // __LINUX__
+#endif // MAX_WIDTH
+#ifndef GIF_MAX_HEIGHT
+#define GIF_MAX_HEIGHT 32767
+#endif
 #define LZW_BUF_SIZE (6*MAX_CHUNK_SIZE)
 #define LZW_HIGHWATER (4*MAX_CHUNK_SIZE)
 // This buffer is used to store the pixel sequence in reverse order
@@ -207,11 +216,16 @@ typedef struct gif_image_tag
     unsigned short pPalette[(MAX_COLORS * 3)/2]; // can hold RGB565 or RGB888 - set in begin()
     unsigned short pLocalPalette[(MAX_COLORS * 3)/2]; // color palettes for GIF images
     int iLocalPalSize, iGlobalPalSize;
-    uint8_t ucLZW[LZW_BUF_SIZE]; // holds de-chunked LZW data
-    // These next 3 are used in Turbo mode to have a larger ucLZW buffer
-    uint16_t usGIFTable[1<<MAX_CODE_SIZE];
-    uint8_t ucGIFPixels[(PIXEL_LAST*2)];
-    uint8_t ucLineBuf[MAX_WIDTH+15]; // current line
+    union {
+        struct {
+            uint8_t ucLZW[LZW_BUF_SIZE]; // holds de-chunked LZW data
+            // These next 3 are reused as ucTurboLZW when Turbo mode is active
+            uint16_t usGIFTable[1<<MAX_CODE_SIZE];
+            uint8_t ucGIFPixels[(PIXEL_LAST*2)];
+            uint8_t ucLineBuf[MAX_WIDTH+15]; // current line
+        };
+        uint8_t ucTurboLZW[LZW_BUF_SIZE_TURBO];
+    };
     uint8_t *pLineBufAligned;
 } GIFIMAGE;
 
@@ -277,24 +291,17 @@ class AnimatedGIF
 #endif // __cplusplus
 
 #if (INTPTR_MAX == INT64_MAX)
-#define ALLOWS_UNALIGNED
-#define INTELSHORT(p) (*(uint16_t *)p)
-#define INTELLONG(p) (*(uint64_t *)p)
 #define REGISTER_WIDTH 64
 #define BIGINT int64_t
 #define BIGUINT uint64_t
 #else
 #define REGISTER_WIDTH 32
-#ifdef ALLOWS_UNALIGNED
-#define INTELSHORT(p) (*(uint16_t *)p)
-#define INTELLONG(p) (*(uint32_t *)p)
-#else
-// Due to unaligned memory causing an exception, we have to do these macros the slow way
-#define INTELSHORT(p) ((*p) + (*(p+1)<<8))
-#define INTELLONG(p) ((*p) + (*(p+1)<<8) + (*(p+2)<<16) + (*(p+3)<<24))
-#endif // ALLOWS_UNALIGNED
 #define BIGINT int32_t
 #define BIGUINT uint32_t
 #endif // 64 vs 32-bit native register size
+
+// Portable, strict-aliasing and alignment-safe little-endian readers
+#define INTELSHORT(p) ((uint16_t)((uint16_t)((const uint8_t *)(p))[0] | ((uint16_t)((const uint8_t *)(p))[1] << 8)))
+#define INTELLONG(p) ((uint32_t)((uint32_t)((const uint8_t *)(p))[0] | ((uint32_t)((const uint8_t *)(p))[1] << 8) | ((uint32_t)((const uint8_t *)(p))[2] << 16) | ((uint32_t)((const uint8_t *)(p))[3] << 24)))
 
 #endif // __ANIMATEDGIF__
