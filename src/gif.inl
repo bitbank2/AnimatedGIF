@@ -1343,11 +1343,49 @@ static void GIFEmitPixels(GIFIMAGE *pPage, const uint8_t *s, int iPixCount)
 //
 // GIFMakePels: expand one LZW code and emit pixels; returns 0 on success, 1 on error
 //
-static int GIFMakePels(GIFIMAGE *pPage, unsigned int code)
+#if GIF_LAZY_RESET
+static int GIFMakePels(GIFIMAGE *pPage, unsigned int code, unsigned int cc, unsigned int nextcode)
 {
     int iPixCount;
     unsigned short *giftabs;
     unsigned char *s, *pEnd, *gifpels;
+
+    pEnd = pPage->ucFileBuf;
+    s = pEnd + FILE_BUF_SIZE;
+    giftabs = pPage->usGIFTable;
+    gifpels = &pPage->ucGIFPixels[PIXEL_LAST];
+
+    while (code >= cc) {
+        unsigned int link;
+        if (code >= nextcode || code <= (cc + 1U) || s == pEnd) {
+            pPage->iError = GIF_DECODE_ERROR;
+            return 1;
+        }
+        *(--s) = gifpels[code];
+        link = giftabs[code];
+        if (link >= code) {
+            pPage->iError = GIF_DECODE_ERROR;
+            return 1;
+        }
+        code = link;
+    }
+    if (s == pEnd) {
+        pPage->iError = GIF_DECODE_ERROR;
+        return 1;
+    }
+    *(--s) = (unsigned char)code;
+    iPixCount = (int)(intptr_t)(pEnd + FILE_BUF_SIZE - s);
+    GIFEmitPixels(pPage, s, iPixCount);
+    return 0;
+} /* GIFMakePels() */
+#else
+static int GIFMakePels(GIFIMAGE *pPage, unsigned int code, unsigned int cc, unsigned int nextcode)
+{
+    int iPixCount;
+    unsigned short *giftabs;
+    unsigned char *s, *pEnd, *gifpels;
+    (void)cc;
+    (void)nextcode;
 
     pEnd = pPage->ucFileBuf;
     s = pEnd + FILE_BUF_SIZE;
@@ -1376,6 +1414,7 @@ static int GIFMakePels(GIFIMAGE *pPage, unsigned int code)
     GIFEmitPixels(pPage, s, iPixCount);
     return 0;
 } /* GIFMakePels() */
+#endif
 
 #define GET_CODE do { \
     if (!GIFReadCode(pImage, &ulBits, &ucBitCount, (int)codesize, (uint16_t)sMask, &code)) return 1; \
@@ -1433,8 +1472,11 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     if (!GIFGetMoreData(pImage)) return 1;
 
     for (i = 0; i < cc; i++) {
-        gifpels[PIXEL_FIRST + i] = gifpels[PIXEL_LAST + i] = (unsigned char)i;
+        gifpels[PIXEL_FIRST + i] = (unsigned char)i;
+#if !GIF_LAZY_RESET
+        gifpels[PIXEL_LAST + i] = (unsigned char)i;
         giftabs[i] = LINK_END;
+#endif
     }
 
 init_codetable:
@@ -1442,7 +1484,9 @@ init_codetable:
     nextlim = (unsigned short)(1U << codesize);
     sMask = (uint16_t)(nextlim - 1U);
     nextcode = (unsigned short)(cc + 2U);
+#if !GIF_LAZY_RESET
     memset(&giftabs[cc], LINK_UNUSED, sizeof(pImage->usGIFTable) - sizeof(giftabs[0]) * cc);
+#endif
     GET_CODE;
     while (code == cc) {
         GET_CODE;
@@ -1454,7 +1498,7 @@ init_codetable:
     }
     c = (unsigned char)code;
     oldcode = code;
-    if (GIFMakePels(pImage, code) != 0) return 1;
+    if (GIFMakePels(pImage, code, cc, nextcode) != 0) return 1;
 
     while (code != eoi && pImage->iYCount > 0) {
         GET_CODE;
@@ -1478,7 +1522,7 @@ init_codetable:
                 nextlim <<= 1;
                 sMask = (uint16_t)(nextlim - 1U);
             }
-            if (GIFMakePels(pImage, code) != 0) return 1;
+            if (GIFMakePels(pImage, code, cc, nextcode) != 0) return 1;
             oldcode = code;
         }
     }

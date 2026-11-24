@@ -78,6 +78,10 @@
 #ifndef GIF_MAX_HEIGHT
 #define GIF_MAX_HEIGHT 32767
 #endif
+// Enable lazy dictionary reset (1 = skip memset on Clear Code, 0 = legacy memset)
+#ifndef GIF_LAZY_RESET
+#define GIF_LAZY_RESET 1
+#endif
 #define LZW_BUF_SIZE (6*MAX_CHUNK_SIZE)
 #define LZW_HIGHWATER (4*MAX_CHUNK_SIZE)
 // This buffer is used to store the pixel sequence in reverse order
