@@ -138,6 +138,19 @@
 #error "Turbo mode overlays ucLZW across standard usGIFTable/ucGIFPixels/ucLineBuf; set GIF_DISABLE_TURBO=1 when using LowMem dictionary or smaller buffers."
 #endif
 
+// Optional cooperative incremental frame decoding API (adds ~20 bytes to GIFIMAGE)
+#ifndef GIF_ENABLE_COOPERATIVE
+#define GIF_ENABLE_COOPERATIVE 0
+#endif
+
+// Cooperative decode status codes
+enum {
+    GIF_DECODE_MORE = 0,       // Budget reached; call decodeStep()/decodeLines() again
+    GIF_DECODE_FRAME_DONE = 1, // Current frame finished
+    GIF_DECODE_END = 2,        // End of GIF stream (trailer / no frame decoded)
+    GIF_DECODE_ERR = -1        // Decode or I/O error (inspect getLastError())
+};
+
 #define PIXEL_FIRST 0
 #define PIXEL_LAST (1<<MAX_CODE_SIZE)
 #define LINK_UNUSED 5911 // 0x1717 to use memset
@@ -303,6 +316,12 @@ typedef struct gif_image_tag
     uint8_t ucLineBuf[MAX_WIDTH+15]; // current line
 #endif
     uint8_t *pLineBufAligned;
+#if GIF_ENABLE_COOPERATIVE
+    // Compact incremental LZW state (~20 bytes) preserved across decodeStep()/decodeLines()
+    uint32_t ulCoopBits;
+    uint16_t usCoopOldCode, usCoopNextCode, usCoopNextLim, usCoopMask, usCoopCC, usCoopEOI;
+    uint8_t ucCoopCodeSize, ucCoopBitCount, ucCoopState, ucCoopFirstChar;
+#endif
 } GIFIMAGE;
 
 #ifdef __cplusplus
@@ -323,6 +342,12 @@ class AnimatedGIF
     void begin(uint8_t ucPaletteType = GIF_PALETTE_RGB565_LE);
     void begin(int iEndian, uint8_t ucPaletteType) { begin(ucPaletteType); };
     int playFrame(bool bSync, int *delayMilliseconds, void *pUser = NULL);
+#if GIF_ENABLE_COOPERATIVE
+    int beginFrame(void *pUser = NULL);
+    int decodeStep(uint32_t u32BudgetUs, int *delayMilliseconds = NULL);
+    int decodeLines(int iMaxLines, int *delayMilliseconds = NULL);
+    bool frameComplete() const;
+#endif
     int getCanvasWidth();
     int getFrameWidth();
     int getFrameHeight();
@@ -356,6 +381,12 @@ class AnimatedGIF
     void GIF_begin(GIFIMAGE *pGIF, unsigned char ucPaletteType);
     void GIF_reset(GIFIMAGE *pGIF);
     int GIF_playFrame(GIFIMAGE *pGIF, int *delayMilliseconds, void *pUser);
+#if GIF_ENABLE_COOPERATIVE
+    int GIF_beginFrame(GIFIMAGE *pGIF, void *pUser);
+    int GIF_decodeStep(GIFIMAGE *pGIF, uint32_t u32BudgetUs, int *delayMilliseconds);
+    int GIF_decodeLines(GIFIMAGE *pGIF, int iMaxLines, int *delayMilliseconds);
+    int GIF_frameComplete(const GIFIMAGE *pGIF);
+#endif
     int GIF_getCanvasWidth(GIFIMAGE *pGIF);
     int GIF_getCanvasHeight(GIFIMAGE *pGIF);
     int GIF_getComment(GIFIMAGE *pGIF, char *destBuffer);

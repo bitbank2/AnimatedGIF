@@ -33,12 +33,36 @@
 #define HAS_NEON
 #endif 
 
+#if GIF_ENABLE_COOPERATIVE
+#if defined(__LINUX__) || defined(__MACH__)
+#include <time.h>
+#endif
+#ifndef GIF_MICROS
+#if defined(ARDUINO)
+#define GIF_MICROS() ((uint32_t)micros())
+#elif defined(__LINUX__) || defined(__MACH__)
+static inline uint32_t GIFGetMicros(void)
+{
+#ifdef CLOCK_MONOTONIC
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000ULL);
+#else
+    return (uint32_t)(((uint64_t)clock() * 1000000ULL) / (uint64_t)CLOCKS_PER_SEC);
+#endif
+}
+#define GIF_MICROS() GIFGetMicros()
+#else
+#define GIF_MICROS() ((uint32_t)0)
+#endif
+#endif // GIF_MICROS
+#endif // GIF_ENABLE_COOPERATIVE
+
 static const unsigned char cGIFBits[9] = {1,4,4,4,8,8,8,8,8}; // convert odd bpp values to ones we can handle
 // forward references
 static int GIFInit(GIFIMAGE *pGIF);
 static int GIFParseInfo(GIFIMAGE *pPage, int bInfoOnly);
 static int GIFGetMoreData(GIFIMAGE *pPage);
-static int GIFMakePels(GIFIMAGE *pPage, unsigned int code);
 static int GIFReadExact(GIFIMAGE *g, uint8_t *dst, int n);
 static int GIFSkipExact(GIFIMAGE *g, int n);
 static int GIFGetCommentImpl(GIFIMAGE *pGIF, char *pDest);
@@ -135,6 +159,10 @@ void GIF_begin(GIFIMAGE *pGIF, unsigned char ucPaletteType)
 
 void GIF_reset(GIFIMAGE *pGIF)
 {
+    pGIF->iError = GIF_SUCCESS;
+#if GIF_ENABLE_COOPERATIVE
+    pGIF->ucCoopState = 0;
+#endif
     (*pGIF->pfnSeek)(&pGIF->GIFFile, 0);
 } /* GIF_reset() */
 //
@@ -1603,28 +1631,58 @@ static int GIFMakePels(GIFIMAGE *pPage, unsigned int code, unsigned int cc, unsi
 #endif
 #endif // GIF_DICT_MODE != 0
 
-#define GET_CODE do { \
-    if (!GIFReadCode(pImage, &ulBits, &ucBitCount, (int)codesize, (uint16_t)sMask, &code)) return 1; \
+#define GET_CODE_STATE do { \
+    if (!GIFReadCode(pImage, &st->ulBits, &st->ucBitCount, (int)st->codesize, st->sMask, &code)) { \
+        st->state = GIF_COOP_ERROR; \
+        return GIF_DECODE_ERR; \
+    } \
 } while (0)
 
-//
-// Decode LZW into an image
-//
-static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
+enum {
+    GIF_COOP_IDLE = 0,
+    GIF_COOP_WAIT_FIRST = 1,
+    GIF_COOP_LOOP = 2,
+    GIF_COOP_FRAME_DONE = 3,
+    GIF_COOP_END = 4,
+    GIF_COOP_ERROR = 5
+};
+
+typedef struct gif_lzw_state_tag {
+    uint32_t ulBits;
+    uint16_t oldcode;
+    uint16_t nextcode;
+    uint16_t nextlim;
+    uint16_t sMask;
+    uint16_t cc;
+    uint16_t eoi;
+    uint8_t codesize;
+    uint8_t ucBitCount;
+    uint8_t state;
+    uint8_t firstChar;
+} GIFLZWState;
+
+static void GIFLZWInitState(GIFIMAGE *pImage, GIFLZWState *st)
+{
+    st->cc = (uint16_t)(1U << pImage->ucCodeStart);
+    st->eoi = (uint16_t)(st->cc + 1U);
+    st->codesize = (uint8_t)(pImage->ucCodeStart + 1U);
+    st->nextlim = (uint16_t)(1U << st->codesize);
+    st->sMask = (uint16_t)(st->nextlim - 1U);
+    st->nextcode = (uint16_t)(st->cc + 2U);
+    st->ulBits = 0;
+    st->ucBitCount = 0;
+    st->oldcode = 0;
+    st->firstChar = 0;
+    st->state = GIF_COOP_WAIT_FIRST;
+#if GIF_DICT_MODE == 0 && !GIF_LAZY_RESET
+    memset(&pImage->usGIFTable[st->cc], LINK_UNUSED, sizeof(pImage->usGIFTable) - sizeof(pImage->usGIFTable[0]) * st->cc);
+#endif
+} /* GIFLZWInitState() */
+
+static int GIFLZWStartFrame(GIFIMAGE *pImage)
 {
     int i;
-    unsigned short oldcode, codesize, nextcode, nextlim;
-    unsigned short cc, eoi;
-    uint16_t sMask;
-    unsigned char c;
-#if GIF_DICT_MODE == 0
-    unsigned short *giftabs = pImage->usGIFTable;
-    unsigned char *gifpels = pImage->ucGIFPixels;
-#endif
-    uint32_t ulBits = 0;
-    uint8_t ucBitCount = 0;
-    unsigned short code;
-    (void)iOptions;
+    uint16_t cc;
 
     if (pImage->ucDrawType == GIF_DRAW_COOKED && pImage->pFrameBuffer == NULL && pImage->pfnDraw == NULL) {
         pImage->iError = GIF_INVALID_PARAMETER;
@@ -1644,7 +1702,7 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
         uint8_t *pActivePalette = (pImage->bUseLocalPalette) ? (uint8_t *)pImage->pLocalPalette : (uint8_t *)pImage->pPalette;
         uint16_t *pPal = (uint16_t *)pActivePalette;
         uint16_t u16BG;
-        c = pImage->ucBackground;
+        uint8_t c = pImage->ucBackground;
         for (int y = pImage->iPrevY; y < pImage->iPrevH + pImage->iPrevY; y++) {
             uint8_t *p = &pImage->pFrameBuffer[(y * pImage->iCanvasWidth) + pImage->iPrevX];
             memset(p, c, pImage->iPrevW);
@@ -1659,7 +1717,6 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     }
 
     cc = (uint16_t)(1U << pImage->ucCodeStart);
-    eoi = (uint16_t)(cc + 1U);
     pImage->iYCount = pImage->iHeight;
     pImage->iXCount = pImage->iWidth;
     pImage->iLZWOff = 0;
@@ -1667,81 +1724,21 @@ static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
     if (!GIFGetMoreData(pImage)) return 1;
 
 #if GIF_DICT_MODE == 0
-    for (i = 0; i < cc; i++) {
-        gifpels[PIXEL_FIRST + i] = (unsigned char)i;
+    for (i = 0; i < (int)cc; i++) {
+        pImage->ucGIFPixels[PIXEL_FIRST + i] = (unsigned char)i;
 #if !GIF_LAZY_RESET
-        gifpels[PIXEL_LAST + i] = (unsigned char)i;
-        giftabs[i] = LINK_END;
+        pImage->ucGIFPixels[PIXEL_LAST + i] = (unsigned char)i;
+        pImage->usGIFTable[i] = LINK_END;
 #endif
-    }
-#endif
-
-init_codetable:
-    codesize = (unsigned short)(pImage->ucCodeStart + 1);
-    nextlim = (unsigned short)(1U << codesize);
-    sMask = (uint16_t)(nextlim - 1U);
-    nextcode = (unsigned short)(cc + 2U);
-#if GIF_DICT_MODE == 0 && !GIF_LAZY_RESET
-    memset(&giftabs[cc], LINK_UNUSED, sizeof(pImage->usGIFTable) - sizeof(giftabs[0]) * cc);
-#endif
-    GET_CODE;
-    while (code == cc) {
-        GET_CODE;
-    }
-    if (code == eoi) goto lzw_done;
-    if (code >= cc) {
-        pImage->iError = GIF_DECODE_ERROR;
-        return 1;
-    }
-    c = (unsigned char)code;
-    oldcode = code;
-#if GIF_DICT_MODE != 0
-    {
-        uint8_t firstPix = c;
-        GIFEmitPixels(pImage, &firstPix, 1);
     }
 #else
-    if (GIFMakePels(pImage, code, cc, nextcode) != 0) return 1;
+    (void)cc;
 #endif
+    return 0;
+} /* GIFLZWStartFrame() */
 
-    while (code != eoi && pImage->iYCount > 0) {
-        GET_CODE;
-        if (code == cc) {
-            goto init_codetable;
-        }
-        if (code != eoi) {
-            if (code > nextcode || code >= (1U << MAX_CODE_SIZE) ||
-                (nextcode >= (1U << MAX_CODE_SIZE) && code == nextcode)) {
-                pImage->iError = GIF_DECODE_ERROR;
-                return 1;
-            }
-#if GIF_DICT_MODE != 0
-            if (GIFExpandAndEmit(pImage, code, oldcode, cc, nextcode, &c) != 0) return 1;
-            if (nextcode < nextlim) {
-                GIFSetPrefix(pImage, nextcode, oldcode);
-                GIFSetSuffix(pImage, nextcode, c);
-            }
-#else
-            if (nextcode < nextlim) {
-                giftabs[nextcode] = oldcode;
-                gifpels[PIXEL_FIRST + nextcode] = c;
-                gifpels[PIXEL_LAST + nextcode] = c = gifpels[PIXEL_FIRST + code];
-            }
-#endif
-            if (nextcode < (1U << MAX_CODE_SIZE)) nextcode++;
-            if (nextcode >= nextlim && codesize < MAX_CODE_SIZE) {
-                codesize++;
-                nextlim <<= 1;
-                sMask = (uint16_t)(nextlim - 1U);
-            }
-#if GIF_DICT_MODE == 0
-            if (GIFMakePels(pImage, code, cc, nextcode) != 0) return 1;
-#endif
-            oldcode = code;
-        }
-    }
-
-lzw_done:
+static int GIFLZWFinishFrame(GIFIMAGE *pImage)
+{
     if (pImage->iYCount != 0) {
         pImage->iError = GIF_DECODE_ERROR;
         return 1;
@@ -1758,7 +1755,291 @@ lzw_done:
     }
     pImage->ucPrevDisp = pImage->ucDisposalMethod;
     return 0;
+} /* GIFLZWFinishFrame() */
+
+static inline int GIFLZWRun(GIFIMAGE *pImage, GIFLZWState *st, int bBounded,
+                            uint32_t u32StartUs, uint32_t u32BudgetUs, int iMaxLines)
+{
+    uint16_t startYCount = pImage->iYCount;
+    int codesRun = 0;
+    uint16_t code;
+
+    for (;;) {
+        uint16_t prevY = pImage->iYCount;
+        if (st->state == GIF_COOP_WAIT_FIRST) {
+            GET_CODE_STATE;
+            if (code == st->cc) {
+#if GIF_ENABLE_COOPERATIVE
+                if (bBounded) {
+                    codesRun++;
+                    if (iMaxLines == 0 && (u32BudgetUs == 0 || ((codesRun & 15) == 0 && (uint32_t)(GIF_MICROS() - u32StartUs) >= u32BudgetUs))) {
+                        return GIF_DECODE_MORE;
+                    }
+                }
+#endif
+                continue;
+            }
+            if (code == st->eoi) {
+                st->state = GIF_COOP_FRAME_DONE;
+                return GIF_DECODE_FRAME_DONE;
+            }
+            if (code >= st->cc) {
+                pImage->iError = GIF_DECODE_ERROR;
+                st->state = GIF_COOP_ERROR;
+                return GIF_DECODE_ERR;
+            }
+            st->firstChar = (uint8_t)code;
+            st->oldcode = code;
+#if GIF_DICT_MODE != 0
+            {
+                uint8_t firstPix = st->firstChar;
+                GIFEmitPixels(pImage, &firstPix, 1);
+            }
+#else
+            if (GIFMakePels(pImage, code, st->cc, st->nextcode) != 0) {
+                st->state = GIF_COOP_ERROR;
+                return GIF_DECODE_ERR;
+            }
+#endif
+            st->state = GIF_COOP_LOOP;
+            if (pImage->iYCount == 0) {
+                st->state = GIF_COOP_FRAME_DONE;
+                return GIF_DECODE_FRAME_DONE;
+            }
+        } else {
+            if (pImage->iYCount == 0) {
+                st->state = GIF_COOP_FRAME_DONE;
+                return GIF_DECODE_FRAME_DONE;
+            }
+            GET_CODE_STATE;
+            if (code == st->cc) {
+                st->codesize = (uint8_t)(pImage->ucCodeStart + 1U);
+                st->nextlim = (uint16_t)(1U << st->codesize);
+                st->sMask = (uint16_t)(st->nextlim - 1U);
+                st->nextcode = (uint16_t)(st->cc + 2U);
+#if GIF_DICT_MODE == 0 && !GIF_LAZY_RESET
+                memset(&pImage->usGIFTable[st->cc], LINK_UNUSED, sizeof(pImage->usGIFTable) - sizeof(pImage->usGIFTable[0]) * st->cc);
+#endif
+                st->state = GIF_COOP_WAIT_FIRST;
+#if GIF_ENABLE_COOPERATIVE
+                if (bBounded) {
+                    codesRun++;
+                    if (iMaxLines == 0 && (u32BudgetUs == 0 || ((codesRun & 15) == 0 && (uint32_t)(GIF_MICROS() - u32StartUs) >= u32BudgetUs))) {
+                        return GIF_DECODE_MORE;
+                    }
+                }
+#endif
+                continue;
+            }
+            if (code == st->eoi) {
+                st->state = GIF_COOP_FRAME_DONE;
+                return GIF_DECODE_FRAME_DONE;
+            }
+            if (code > st->nextcode || code >= (1U << MAX_CODE_SIZE) ||
+                (st->nextcode >= (1U << MAX_CODE_SIZE) && code == st->nextcode)) {
+                pImage->iError = GIF_DECODE_ERROR;
+                st->state = GIF_COOP_ERROR;
+                return GIF_DECODE_ERR;
+            }
+#if GIF_DICT_MODE != 0
+            if (GIFExpandAndEmit(pImage, code, st->oldcode, st->cc, st->nextcode, &st->firstChar) != 0) {
+                st->state = GIF_COOP_ERROR;
+                return GIF_DECODE_ERR;
+            }
+            if (st->nextcode < st->nextlim) {
+                GIFSetPrefix(pImage, st->nextcode, st->oldcode);
+                GIFSetSuffix(pImage, st->nextcode, st->firstChar);
+            }
+#else
+            if (st->nextcode < st->nextlim) {
+                pImage->usGIFTable[st->nextcode] = st->oldcode;
+                pImage->ucGIFPixels[PIXEL_FIRST + st->nextcode] = st->firstChar;
+                pImage->ucGIFPixels[PIXEL_LAST + st->nextcode] = st->firstChar = pImage->ucGIFPixels[PIXEL_FIRST + code];
+            }
+#endif
+            if (st->nextcode < (1U << MAX_CODE_SIZE)) st->nextcode++;
+            if (st->nextcode >= st->nextlim && st->codesize < MAX_CODE_SIZE) {
+                st->codesize++;
+                st->nextlim <<= 1;
+                st->sMask = (uint16_t)(st->nextlim - 1U);
+            }
+#if GIF_DICT_MODE == 0
+            if (GIFMakePels(pImage, code, st->cc, st->nextcode) != 0) {
+                st->state = GIF_COOP_ERROR;
+                return GIF_DECODE_ERR;
+            }
+#endif
+            st->oldcode = code;
+            if (pImage->iYCount == 0) {
+                st->state = GIF_COOP_FRAME_DONE;
+                return GIF_DECODE_FRAME_DONE;
+            }
+        }
+
+#if GIF_ENABLE_COOPERATIVE
+        if (bBounded) {
+            codesRun++;
+            if (iMaxLines > 0) {
+                if ((int)(startYCount - pImage->iYCount) >= iMaxLines) {
+                    return GIF_DECODE_MORE;
+                }
+            } else {
+                if (u32BudgetUs == 0 ||
+                    ((pImage->iYCount != prevY || (codesRun & 15) == 0) && (uint32_t)(GIF_MICROS() - u32StartUs) >= u32BudgetUs)) {
+                    return GIF_DECODE_MORE;
+                }
+            }
+        }
+#else
+        (void)bBounded;
+        (void)u32StartUs;
+        (void)u32BudgetUs;
+        (void)iMaxLines;
+        (void)startYCount;
+        (void)codesRun;
+        (void)prevY;
+#endif
+    }
+} /* GIFLZWRun() */
+
+//
+// Decode LZW into an image (synchronous full-frame path)
+//
+static int DecodeLZW(GIFIMAGE *pImage, int iOptions)
+{
+    GIFLZWState st;
+    int rc;
+    (void)iOptions;
+
+    if (GIFLZWStartFrame(pImage) != 0) return 1;
+    GIFLZWInitState(pImage, &st);
+    rc = GIFLZWRun(pImage, &st, 0, 0, 0, 0);
+    if (rc != GIF_DECODE_FRAME_DONE) return 1;
+    return GIFLZWFinishFrame(pImage);
 } /* DecodeLZW() */
+
+#if GIF_ENABLE_COOPERATIVE
+int GIF_beginFrame(GIFIMAGE *pGIF, void *pUser)
+{
+    GIFLZWState st;
+    if (!pGIF || !pGIF->pfnRead || !pGIF->pfnSeek) {
+        if (pGIF) {
+            pGIF->iError = GIF_INVALID_PARAMETER;
+            pGIF->ucCoopState = GIF_COOP_ERROR;
+        }
+        return 0;
+    }
+    if (pGIF->GIFFile.iPos >= pGIF->GIFFile.iSize) {
+        pGIF->iError = GIF_EMPTY_FRAME;
+        pGIF->ucCoopState = GIF_COOP_END;
+        return 0;
+    }
+    if (!GIFParseInfo(pGIF, 0)) {
+        pGIF->ucCoopState = (pGIF->iError == GIF_EMPTY_FRAME) ? GIF_COOP_END : GIF_COOP_ERROR;
+        return 0;
+    }
+    if (pGIF->iError == GIF_EMPTY_FRAME) {
+        pGIF->ucCoopState = GIF_COOP_END;
+        return 0;
+    }
+    pGIF->pUser = pUser;
+    if (GIFLZWStartFrame(pGIF) != 0) {
+        pGIF->ucCoopState = GIF_COOP_ERROR;
+        return 0;
+    }
+    GIFLZWInitState(pGIF, &st);
+    pGIF->ulCoopBits = st.ulBits;
+    pGIF->usCoopOldCode = st.oldcode;
+    pGIF->usCoopNextCode = st.nextcode;
+    pGIF->usCoopNextLim = st.nextlim;
+    pGIF->usCoopMask = st.sMask;
+    pGIF->usCoopCC = st.cc;
+    pGIF->usCoopEOI = st.eoi;
+    pGIF->ucCoopCodeSize = st.codesize;
+    pGIF->ucCoopBitCount = st.ucBitCount;
+    pGIF->ucCoopState = st.state;
+    pGIF->ucCoopFirstChar = st.firstChar;
+    return 1;
+} /* GIF_beginFrame() */
+
+static int GIFCoopAdvance(GIFIMAGE *pGIF, uint32_t u32BudgetUs, int iMaxLines, int *delayMilliseconds)
+{
+    GIFLZWState st;
+    int rc;
+    uint32_t startUs;
+
+    if (!pGIF) return GIF_DECODE_ERR;
+    if (pGIF->ucCoopState == GIF_COOP_FRAME_DONE) {
+        if (delayMilliseconds) *delayMilliseconds = pGIF->iFrameDelay;
+        return GIF_DECODE_FRAME_DONE;
+    }
+    if (pGIF->ucCoopState == GIF_COOP_END) {
+        if (delayMilliseconds) *delayMilliseconds = 0;
+        return GIF_DECODE_END;
+    }
+    if (pGIF->ucCoopState != GIF_COOP_WAIT_FIRST && pGIF->ucCoopState != GIF_COOP_LOOP) {
+        pGIF->iError = GIF_INVALID_PARAMETER;
+        return GIF_DECODE_ERR;
+    }
+
+    st.ulBits = pGIF->ulCoopBits;
+    st.oldcode = pGIF->usCoopOldCode;
+    st.nextcode = pGIF->usCoopNextCode;
+    st.nextlim = pGIF->usCoopNextLim;
+    st.sMask = pGIF->usCoopMask;
+    st.cc = pGIF->usCoopCC;
+    st.eoi = pGIF->usCoopEOI;
+    st.codesize = pGIF->ucCoopCodeSize;
+    st.ucBitCount = pGIF->ucCoopBitCount;
+    st.state = pGIF->ucCoopState;
+    st.firstChar = pGIF->ucCoopFirstChar;
+
+    startUs = (iMaxLines == 0 && u32BudgetUs > 0) ? GIF_MICROS() : 0;
+    rc = GIFLZWRun(pGIF, &st, 1, startUs, u32BudgetUs, iMaxLines);
+
+    pGIF->ulCoopBits = st.ulBits;
+    pGIF->usCoopOldCode = st.oldcode;
+    pGIF->usCoopNextCode = st.nextcode;
+    pGIF->usCoopNextLim = st.nextlim;
+    pGIF->usCoopMask = st.sMask;
+    pGIF->ucCoopCodeSize = st.codesize;
+    pGIF->ucCoopBitCount = st.ucBitCount;
+    pGIF->ucCoopState = st.state;
+    pGIF->ucCoopFirstChar = st.firstChar;
+
+    if (rc == GIF_DECODE_MORE) {
+        return GIF_DECODE_MORE;
+    }
+    if (rc == GIF_DECODE_FRAME_DONE) {
+        if (GIFLZWFinishFrame(pGIF) != 0) {
+            pGIF->ucCoopState = GIF_COOP_ERROR;
+            return GIF_DECODE_ERR;
+        }
+        pGIF->ucCoopState = GIF_COOP_FRAME_DONE;
+        if (delayMilliseconds) *delayMilliseconds = pGIF->iFrameDelay;
+        return GIF_DECODE_FRAME_DONE;
+    }
+    pGIF->ucCoopState = GIF_COOP_ERROR;
+    return GIF_DECODE_ERR;
+} /* GIFCoopAdvance() */
+
+int GIF_decodeStep(GIFIMAGE *pGIF, uint32_t u32BudgetUs, int *delayMilliseconds)
+{
+    return GIFCoopAdvance(pGIF, u32BudgetUs, 0, delayMilliseconds);
+} /* GIF_decodeStep() */
+
+int GIF_decodeLines(GIFIMAGE *pGIF, int iMaxLines, int *delayMilliseconds)
+{
+    if (iMaxLines <= 0) iMaxLines = 1;
+    return GIFCoopAdvance(pGIF, 0, iMaxLines, delayMilliseconds);
+} /* GIF_decodeLines() */
+
+int GIF_frameComplete(const GIFIMAGE *pGIF)
+{
+    if (!pGIF) return 1;
+    return (pGIF->ucCoopState == GIF_COOP_FRAME_DONE || pGIF->ucCoopState == GIF_COOP_END) ? 1 : 0;
+} /* GIF_frameComplete() */
+#endif // GIF_ENABLE_COOPERATIVE
 
 void GIF_setDrawCallback(GIFIMAGE *pGIF, GIF_DRAW_CALLBACK *pfnDraw)
 {

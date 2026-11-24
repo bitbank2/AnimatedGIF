@@ -294,6 +294,9 @@ void AnimatedGIF::close()
 void AnimatedGIF::reset()
 {
     _gif.iError = GIF_SUCCESS;
+#if GIF_ENABLE_COOPERATIVE
+    _gif.ucCoopState = 0;
+#endif
     (*_gif.pfnSeek)(&_gif.GIFFile, 0);
 } /* reset() */
 
@@ -381,4 +384,26 @@ long lTime = millis();
         *delayMilliseconds = _gif.iFrameDelay;
     return (_gif.GIFFile.iPos < _gif.GIFFile.iSize-10);
 } /* playFrame() */
+
+#if GIF_ENABLE_COOPERATIVE
+int AnimatedGIF::beginFrame(void *pUser)
+{
+    return GIF_beginFrame(&_gif, pUser);
+} /* beginFrame() */
+
+int AnimatedGIF::decodeStep(uint32_t u32BudgetUs, int *delayMilliseconds)
+{
+    return GIF_decodeStep(&_gif, u32BudgetUs, delayMilliseconds);
+} /* decodeStep() */
+
+int AnimatedGIF::decodeLines(int iMaxLines, int *delayMilliseconds)
+{
+    return GIF_decodeLines(&_gif, iMaxLines, delayMilliseconds);
+} /* decodeLines() */
+
+bool AnimatedGIF::frameComplete() const
+{
+    return GIF_frameComplete(&_gif) != 0;
+} /* frameComplete() */
+#endif // GIF_ENABLE_COOPERATIVE
 
