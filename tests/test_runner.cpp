@@ -8,14 +8,54 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <new>
 #include <sys/stat.h>
+#include <type_traits>
 #include <unistd.h>
 
 #ifndef __LINUX__
 #define __LINUX__
 #endif
 
+#if (defined(GIF_TRANSIENT_WORK) && GIF_TRANSIENT_WORK) || (defined(GIF_PROFILE_TRANSIENT) && (!defined(GIF_TRANSIENT_WORK) || GIF_TRANSIENT_WORK))
+static int g_liveAllocs = 0;
+static int g_oomCountdown = -1;
+
+static void *testGifMalloc(size_t sz) {
+    if (g_oomCountdown >= 0 && g_oomCountdown-- == 0) return nullptr;
+    void *p = std::malloc(sz ? sz : 1);
+    if (p) {
+        std::memset(p, 0xA5, sz ? sz : 1);
+        g_liveAllocs++;
+    }
+    return p;
+}
+
+static void *testGifCalloc(size_t n, size_t sz) {
+    if (g_oomCountdown >= 0 && g_oomCountdown-- == 0) return nullptr;
+    void *p = std::calloc(n ? n : 1, sz ? sz : 1);
+    if (p) g_liveAllocs++;
+    return p;
+}
+
+static void testGifFree(void *p) {
+    if (!p) return;
+    g_liveAllocs--;
+    std::free(p);
+}
+
+#define GIF_MALLOC(sz) testGifMalloc(sz)
+#define GIF_CALLOC(n, sz) testGifCalloc((n), (sz))
+#define GIF_FREE(p) testGifFree(p)
+#endif
+
 #include "../src/AnimatedGIF.cpp"
+
+#if defined(INTELSHORT) || defined(INTELLONG)
+#error "AnimatedGIF.h must not define unprefixed INTELSHORT/INTELLONG"
+#endif
+static_assert(!std::is_copy_constructible<AnimatedGIF>::value, "AnimatedGIF must not be copy-constructible");
+static_assert(!std::is_copy_assignable<AnimatedGIF>::value, "AnimatedGIF must not be copy-assignable");
 
 #include "../test_images/badgers.h"
 #include "../test_images/bw_wiggler_128x64.h"
@@ -300,8 +340,8 @@ int main(int argc, char **argv) {
 
     std::string mode = argv[1];
     if (mode == "sizeof") {
-        printf("sizeof(GIFIMAGE)=%zu sizeof(AnimatedGIF)=%zu MAX_WIDTH=%d FILE_BUF_SIZE=%d LZW_BUF_SIZE=%d\n",
-               sizeof(GIFIMAGE), sizeof(AnimatedGIF), (int)MAX_WIDTH, (int)FILE_BUF_SIZE, (int)LZW_BUF_SIZE);
+        printf("sizeof(GIFIMAGE)=%zu sizeof(AnimatedGIF)=%zu MAX_WIDTH=%d FILE_BUF_SIZE=%d LZW_BUF_SIZE=%d TRANSIENT=%d\n",
+               sizeof(GIFIMAGE), sizeof(AnimatedGIF), (int)MAX_WIDTH, (int)FILE_BUF_SIZE, (int)LZW_BUF_SIZE, (int)GIF_TRANSIENT_WORK);
         return 0;
     }
     if (argc < 3) {
@@ -616,6 +656,227 @@ int main(int argc, char **argv) {
             }
             checked++;
         }
+
+        // Lifecycle safety: uninitialized-storage ctor/dtor, idempotent close(), failed open()
+        {
+            alignas(AnimatedGIF) uint8_t dirtyStorage[sizeof(AnimatedGIF)];
+            std::memset(dirtyStorage, 0xA5, sizeof(dirtyStorage));
+            AnimatedGIF *pg = new (dirtyStorage) AnimatedGIF();
+            pg->~AnimatedGIF();
+            checked++;
+        }
+        {
+            static int lcCloseCount = 0;
+            auto v = loadFile(corpusDir + "/valid_local_palette.gif");
+            auto lcOpenOk = [](const char *, int32_t *sz) -> void * {
+                *sz = g_stream.size;
+                g_stream.pos = 0;
+                g_stream.totalRead = 0;
+                return &g_stream;
+            };
+            auto lcOpenFail = [](const char *, int32_t *sz) -> void * {
+                *sz = 0;
+                return nullptr;
+            };
+            auto lcClose = [](void *) { lcCloseCount++; };
+
+            lcCloseCount = 0;
+            {
+                AnimatedGIF g;
+                g.begin(GIF_PALETTE_RGB565_LE);
+                g_stream = {v.data(), (int32_t)v.size(), 0, 0, -1, 0, 0};
+                if (!g.open("ok.gif", lcOpenOk, lcClose, cbRead, cbSeek, drawCallback)) {
+                    fprintf(stderr, "FAIL lifecycle ok open err=%d\n", g.getLastError());
+                    failures++;
+                }
+                g.close();
+                g.close();
+            }
+            if (lcCloseCount != 1) {
+                fprintf(stderr, "FAIL lifecycle double-close count=%d (exp 1)\n", lcCloseCount);
+                failures++;
+            }
+
+            lcCloseCount = 0;
+            {
+                AnimatedGIF g;
+                g.begin(GIF_PALETTE_RGB565_LE);
+                int ok = g.open("missing.gif", lcOpenFail, lcClose, cbRead, cbSeek, drawCallback);
+                if (ok != 0 || g.getLastError() != GIF_FILE_NOT_OPEN) {
+                    fprintf(stderr, "FAIL lifecycle open-fail ok=%d err=%d\n", ok, g.getLastError());
+                    failures++;
+                }
+                g.close();
+            }
+            if (lcCloseCount != 0) {
+                fprintf(stderr, "FAIL lifecycle close called after failed open: count=%d\n", lcCloseCount);
+                failures++;
+            }
+            checked += 2;
+        }
+
+#if GIF_TRANSIENT_WORK
+        // Transient allocation lifetime, deterministic OOM recovery, and cooperative aborts
+        {
+            auto v = loadFile(corpusDir + "/valid_local_palette.gif");
+            uint64_t expHash = golden["valid_local_palette.gif"].raw565le;
+            int expFrames = golden["valid_local_palette.gif"].frames;
+            int expLines = golden["valid_local_palette.gif"].lines;
+
+            if (g_liveAllocs != 0) {
+                fprintf(stderr, "FAIL transient leak before checks: live=%d\n", g_liveAllocs);
+                failures++;
+            }
+
+            // 1) open() and getInfo() must leave 0 live heap buffers
+            {
+                AnimatedGIF g;
+                g.begin(GIF_PALETTE_RGB565_LE);
+                if (!g.open(v.data(), (int)v.size(), drawCallback) || g_liveAllocs != 0) {
+                    fprintf(stderr, "FAIL transient open() leaked or failed: live=%d\n", g_liveAllocs);
+                    failures++;
+                }
+                GIFINFO info{};
+                if (!g.getInfo(&info) || info.iFrameCount != expFrames || g_liveAllocs != 0) {
+                    fprintf(stderr, "FAIL transient getInfo() live=%d frames=%d\n", g_liveAllocs, info.iFrameCount);
+                    failures++;
+                }
+                for (int failIdx = 0; failIdx < 4; failIdx++) {
+                    g.reset();
+                    g_oomCountdown = failIdx;
+                    int r = g.playFrame(false, nullptr, nullptr);
+                    g_oomCountdown = -1;
+                    if (r != -1 || g.getLastError() != GIF_ERROR_MEMORY || g_liveAllocs != 0) {
+                        fprintf(stderr, "FAIL transient OOM failIdx=%d r=%d err=%d live=%d\n",
+                                failIdx, r, g.getLastError(), g_liveAllocs);
+                        failures++;
+                    }
+                }
+                // Full decode after OOM recovery must match golden pixel-for-pixel
+                g.reset();
+                HashCtx ctx{14695981039346656037ULL, 0, false};
+                int frames = 0;
+                while (frames < 50) {
+                    int r = g.playFrame(false, nullptr, &ctx);
+                    if (r < 0) { failures++; break; }
+                    if (g.getLastError() == GIF_SUCCESS) frames++;
+                    if (g_liveAllocs != 0) {
+                        fprintf(stderr, "FAIL transient live=%d after playFrame()\n", g_liveAllocs);
+                        failures++;
+                        break;
+                    }
+                    if (r == 0) break;
+                }
+                if (frames != expFrames || ctx.lines != expLines || ctx.hash != expHash) {
+                    fprintf(stderr, "FAIL transient recovery mismatch\n");
+                    failures++;
+                }
+                g.close();
+            }
+
+            // 2) C API lifecycle under transient mode
+            {
+                GIFIMAGE cg;
+                GIF_begin(&cg, GIF_PALETTE_RGB565_LE);
+                if (!GIF_openRAM(&cg, v.data(), (int)v.size(), drawCallback) || g_liveAllocs != 0) {
+                    fprintf(stderr, "FAIL transient C API openRAM live=%d\n", g_liveAllocs);
+                    failures++;
+                } else {
+                    g_oomCountdown = 1;
+                    int rOom = GIF_playFrame(&cg, nullptr, nullptr);
+                    g_oomCountdown = -1;
+                    if (rOom != -1 || GIF_getLastError(&cg) != GIF_ERROR_MEMORY || g_liveAllocs != 0) {
+                        fprintf(stderr, "FAIL transient C API OOM r=%d err=%d live=%d\n",
+                                rOom, GIF_getLastError(&cg), g_liveAllocs);
+                        failures++;
+                    }
+                    GIF_reset(&cg);
+                    HashCtx ctx{14695981039346656037ULL, 0, false};
+                    while (GIF_playFrame(&cg, nullptr, &ctx) > 0) {}
+                    if (ctx.hash != expHash || g_liveAllocs != 0) {
+                        fprintf(stderr, "FAIL transient C API decode/live=%d\n", g_liveAllocs);
+                        failures++;
+                    }
+                    GIF_close(&cg);
+                }
+            }
+
+#if defined(GIF_ENABLE_COOPERATIVE) && GIF_ENABLE_COOPERATIVE
+            // 3) Cooperative OOM on beginFrame() and mid-frame abort via reset() / destructor
+            for (int failIdx = 0; failIdx < 4; failIdx++) {
+                AnimatedGIF g;
+                g.begin(GIF_PALETTE_RGB565_LE);
+                if (!g.open(v.data(), (int)v.size(), drawCallback)) { failures++; break; }
+                g_oomCountdown = failIdx;
+                int okBegin = g.beginFrame(nullptr);
+                g_oomCountdown = -1;
+                if (okBegin != 0 || g.getLastError() != GIF_ERROR_MEMORY || g_liveAllocs != 0) {
+                    fprintf(stderr, "FAIL transient coop OOM failIdx=%d ok=%d err=%d live=%d\n",
+                            failIdx, okBegin, g.getLastError(), g_liveAllocs);
+                    failures++;
+                }
+                if (g.decodeStep(500) != GIF_DECODE_ERR || g_liveAllocs != 0) {
+                    fprintf(stderr, "FAIL transient coop step after failed beginFrame live=%d\n", g_liveAllocs);
+                    failures++;
+                }
+                g.close();
+            }
+            {
+                AnimatedGIF g;
+                g.begin(GIF_PALETTE_RGB565_LE);
+                g.open(v.data(), (int)v.size(), drawCallback);
+                HashCtx ctx{14695981039346656037ULL, 0, false};
+                if (!g.beginFrame(&ctx) || g.decodeLines(1) != GIF_DECODE_MORE || g_liveAllocs <= 0) {
+                    fprintf(stderr, "FAIL transient coop mid-frame start live=%d\n", g_liveAllocs);
+                    failures++;
+                }
+                g.reset();
+                if (g_liveAllocs != 0 || g.decodeLines(1) != GIF_DECODE_ERR) {
+                    fprintf(stderr, "FAIL transient coop mid-frame reset live=%d\n", g_liveAllocs);
+                    failures++;
+                }
+                // Decode normally after mid-frame reset abort
+                ctx = {14695981039346656037ULL, 0, false};
+                int frames = 0;
+                while (frames < 50 && g.beginFrame(&ctx)) {
+                    int st = GIF_DECODE_MORE;
+                    while (!g.frameComplete()) {
+                        st = g.decodeLines(3);
+                        if (st != GIF_DECODE_MORE) break;
+                    }
+                    if (st == GIF_DECODE_FRAME_DONE) frames++;
+                    if (g_liveAllocs != 0) { failures++; break; }
+                    if (st == GIF_DECODE_ERR || st == GIF_DECODE_END) break;
+                }
+                if (frames != expFrames || ctx.hash != expHash || g_liveAllocs != 0) {
+                    fprintf(stderr, "FAIL transient coop recovery after reset abort\n");
+                    failures++;
+                }
+                g.close();
+            }
+            {
+                {
+                    AnimatedGIF g;
+                    g.begin(GIF_PALETTE_RGB565_LE);
+                    g.open(v.data(), (int)v.size(), drawCallback);
+                    if (!g.beginFrame(nullptr) || g.decodeLines(1) != GIF_DECODE_MORE || g_liveAllocs <= 0) {
+                        fprintf(stderr, "FAIL transient coop dtor setup live=%d\n", g_liveAllocs);
+                        failures++;
+                    }
+                }
+                if (g_liveAllocs != 0) {
+                    fprintf(stderr, "FAIL transient coop ~AnimatedGIF() leaked live=%d\n", g_liveAllocs);
+                    failures++;
+                }
+            }
+#endif
+            if (g_liveAllocs != 0) {
+                fprintf(stderr, "FAIL transient final leak check: live=%d\n", g_liveAllocs);
+                failures++;
+            }
+            checked += 4;
+        }
+#endif // GIF_TRANSIENT_WORK
 
         printf("verify: %d checks, %d failures (sizeof(GIFIMAGE)=%zu)\n", checked, failures, sizeof(GIFIMAGE));
         return failures ? 1 : 0;

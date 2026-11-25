@@ -120,8 +120,9 @@ Não assumir que uma estratégia é necessariamente mais rápida; medir antes de
 | `GIF_PROFILE_BALANCED` | Prefixo 16-bit + sufixo 8-bit, `FILE_BUF=768`, `LZW_BUF=768`, sem Turbo |
 | `GIF_PROFILE_MINIMAL` | Prefixo 12-bit + sufixo 8-bit, `FILE_BUF=768`, `LZW_BUF=512`, `RGB565_ONLY`, sem Turbo |
 | `GIF_PROFILE_COOPERATIVE` | Base Balanced + decodificação incremental cooperativa |
+| `GIF_PROFILE_TRANSIENT` | Struct residente de ~`664 B`; aloca tabelas de 16-bit + `LZW_BUF=1530` por quadro no heap |
 
-Permitir opções ortogonais (`GIF_DICT_MODE`, `GIF_FILE_BUF_SIZE`, `GIF_LZW_BUF_SIZE`, `GIF_RGB565_ONLY`, `GIF_ENABLE_COOPERATIVE`, `GIF_LAZY_RESET`, `MAX_WIDTH`) protegendo combinações incompatíveis com `#error` (ex.: `GIF_DISABLE_TURBO == 0` com dicionário compacto). O perfil padrão (`GIF_PROFILE_FAST`) conserva o comportamento compatível do upstream com as correções de robustez e lazy reset.
+Permitir opções ortogonais (`GIF_DICT_MODE`, `GIF_FILE_BUF_SIZE`, `GIF_LZW_BUF_SIZE`, `GIF_RGB565_ONLY`, `GIF_ENABLE_COOPERATIVE`, `GIF_LAZY_RESET`, `GIF_TRANSIENT_WORK`, `GIF_MALLOC`/`GIF_CALLOC`/`GIF_FREE`, `MAX_WIDTH`) protegendo combinações incompatíveis com `#error` (ex.: `GIF_DISABLE_TURBO == 0` com dicionário compacto ou modo transiente). No wrapper C++, construtor padrão zera `_gif`, destrutor RAII chama `close()`, cópia/atribuição são desabilitadas (`= delete`), `close()`/`GIF_close()` são idempotentes e `pfnClose` só permanece ativo se `pfnOpen`/`fopen` tiver sucesso. As macros leitoras little-endian usam o prefixo `GIF_INTELSHORT` / `GIF_INTELLONG` para evitar colisão com headers irmãos (como `JPEGDEC.h`). O perfil padrão (`GIF_PROFILE_FAST`) conserva o comportamento compatível do upstream com as correções de robustez e lazy reset.
 
 ## 9. Benchmark e critérios de aceitação
 
@@ -144,14 +145,17 @@ Compilado para `esp8266:esp8266:generic:eesz=4M2M,xtal=160,ip=lm2n` via [`tests/
 | Perfil / Flags | `sizeof(AnimatedGIF)` | Delta vs Upstream | `DRAM` (`DATA+RODATA+BSS`) | `IRAM` | `IROM` (Flash) | `.bin` |
 |---|---:|---:|---:|---:|---:|---:|
 | Upstream (`17a6a2ed`) | 24172 B | — | 52228 B (`49792` BSS) | 26979 B | 232292 B | 265856 B |
-| `GIF_PROFILE_FAST` (padrão) | 24172 B | 0 B | 52232 B (`49792` BSS) | 26979 B | 232548 B | 266112 B |
-| `GIF_PROFILE_BALANCED` | 15980 B | -8192 B (-33,9%) | 44040 B (`41600` BSS) | 26979 B | 231108 B | 264672 B |
-| `GIF_PROFILE_MINIMAL` | 13164 B | -11008 B (-45,5%) | 41224 B (`38784` BSS) | 26979 B | 230260 B | 263824 B |
-| `GIF_PROFILE_MINIMAL -DMAX_WIDTH=240` | 12924 B | -11248 B (-46,5%) | 40984 B (`38544` BSS) | 26979 B | 230260 B | 263824 B |
-| `GIF_PROFILE_COOPERATIVE` | 16000 B | -8172 B (-33,8%) | 44064 B (`41624` BSS) | 26991 B | 231396 B | 264976 B |
-| `GIF_PROFILE_MINIMAL -DGIF_ENABLE_COOPERATIVE=1` | 13184 B | -10988 B (-45,5%) | 41248 B (`38808` BSS) | 26991 B | 230548 B | 264128 B |
+| `GIF_PROFILE_FAST` (padrão) | 24172 B | 0 B | 52232 B (`49792` BSS) | 26979 B | 232676 B | 266240 B |
+| `GIF_PROFILE_BALANCED` | 15980 B | -8192 B (-33,9%) | 44040 B (`41600` BSS) | 26979 B | 231236 B | 264800 B |
+| `GIF_PROFILE_MINIMAL` | 13164 B | -11008 B (-45,5%) | 41224 B (`38784` BSS) | 26979 B | 230372 B | 263936 B |
+| `GIF_PROFILE_MINIMAL -DMAX_WIDTH=240` | 12924 B | -11248 B (-46,5%) | 40984 B (`38544` BSS) | 26979 B | 230372 B | 263936 B |
+| `GIF_PROFILE_COOPERATIVE` | 16000 B | -8172 B (-33,8%) | 44064 B (`41624` BSS) | 26991 B | 231556 B | 265136 B |
+| `GIF_PROFILE_MINIMAL -DGIF_ENABLE_COOPERATIVE=1` | 13184 B | -10988 B (-45,5%) | 41248 B (`38808` BSS) | 26991 B | 230676 B | 264256 B |
+| `GIF_PROFILE_TRANSIENT` | 664 B | -23508 B (-97,3%) | 28728 B (`26288` BSS) | 26979 B | 230436 B | 264000 B |
+| `GIF_PROFILE_TRANSIENT -DGIF_FILE_BUF_SIZE=4096` | 664 B | -23508 B (-97,3%) | 28728 B (`26288` BSS) | 26979 B | 230452 B | 264016 B |
+| `GIF_PROFILE_TRANSIENT -DGIF_ENABLE_COOPERATIVE=1` | 684 B | -23488 B (-97,2%) | 28744 B (`26304` BSS) | 26991 B | 230756 B | 264336 B |
 
-> O endurecimento completo do perfil `FAST` adicionou `0 B` em `sizeof(AnimatedGIF)` e `0 B` em `BSS`, com apenas `+256 B` em `IROM` e `+4 B` em `RODATA`.
+> No `GIF_PROFILE_TRANSIENT`, apenas `664 B` (`684 B` com cooperativo) ficam residentes entre quadros; os buffers de decodificação somam pico transiente de `15593 B` no padrão (`18921 B` com `GIF_FILE_BUF_SIZE=4096`, maior bloco contíguo de `8192 B`) apenas enquanto o quadro é decodificado, com `0 B` no heap durante `open()` / `getInfo()` (lote de paleta de 48 B na pilha). Todos os demais perfis fazem `0` alocações dinâmicas.
 
 #### 2. Desempenho e responsividade no host (`-O2`, x86_64 WSL2, `MAX_WIDTH=2048`)
 
@@ -178,11 +182,23 @@ Comparação aquecida (`tests/bench.cpp`, callback nulo) entre perfis principais
 | `GIF_PROFILE_COOPERATIVE` | 17624 B | 47,80–593,40 us | 593,40 us (vs 3605,61 us med) | 30,04 ms / 523,40 us |
 | `GIF_PROFILE_MINIMAL + COOP` | 14808 B | 85,90–621,70 us | 515,90 us (vs 8317,53 us med) | 37,83 ms / 599,80 us |
 
+- **Comparação direta no host ocioso (`-O2`, x86_64 WSL2) com `TRANSIENT`:**
+
+| Alvo (frames) | `FAST` (25800 B) | `MINIMAL` (14784 B) | `TRANSIENT` (744 B res.) | `TRANSIENT_4K` (744 B res.) | `TRANSIENT_COOP` (768 B, `max_step`) |
+|---|---:|---:|---:|---:|---:|
+| `emb_badgers` (9f) | 2,06 ms | 1,82 ms | 1,19 ms | 1,24 ms | 1,35 ms (`171,69 us`) |
+| `emb_bw_wiggler` (200f) | 10,92 ms | 14,54 ms | 6,36 ms | 7,12 ms | 7,64 ms (`94,00 us`) |
+| `emb_earth` (103f) | 22,30 ms | 19,36 ms | 14,66 ms | 17,82 ms | 14,51 ms (`317,49 us`) |
+| `emb_nostromo` (202f) | 12,82 ms | 23,35 ms | 12,79 ms | 11,99 ms | 12,05 ms (`178,89 us`) |
+| `emb_thisisfine` (33f) | 9,46 ms | 16,15 ms | 9,20 ms | 9,45 ms | 11,79 ms (`342,68 us`) |
+| `valid_deferred_cc` (1f) | 0,43 ms | 0,49 ms | 0,36 ms | 0,35 ms | 0,60 ms (`463,08 us`) |
+| `valid_multi_cc` (1f) | 0,02 ms | 0,06 ms | 0,02 ms | 0,02 ms | 0,02 ms (`29,00 us`) |
+| `valid_long_chain` (1f) | 1,09 ms | 4,75 ms | 2,16 ms | 1,42 ms | 2,19 ms (`503,48 us`) |
+
 #### 3. Correção, fuzzing e integração drop-in no `smalltv-pomodoro`
 
 - **Suíte de regressão e fuzzing (`tests/run_tests.sh`):**
-  - `run_tests.sh 50000`: todas as 11 configurações (`fast`, `fast32`, `fast_no_lazy`, `balanced`, `minimal`, `minimal240`, `coop`, `minimal_coop`, `dict16_full`, `dict12_full`, `dict12_lzw264`) passaram com `41 checks, 0 failures` cada (incluindo hashes golden pixel-a-pixel capturados do upstream `17a6a2ed` e leituras parciais de 1 byte por chamada), compilação C99 pura OK e fuzzing ASan+UBSan (`50000` casos em 32 bits `sizeof=14752` + `50000` casos em 64 bits `sizeof=25800`) com `0` falhas (além de `25000` casos no modo cooperativo no commit `28186f0`).
-  - Revalidação pós-ajuste de vendoring no wrapper (`src/AnimatedGIF.cpp`): `run_tests.sh 2000` passou (`ALL TESTS PASSED`, 11 perfis + C99 + `2000`+`2000` fuzzing).
+  - `run_tests.sh 25000`: todas as 17 configurações (`fast`, `fast32`, `fast_no_lazy`, `balanced`, `minimal`, `minimal240`, `coop`, `minimal_coop`, `dict16_full`, `dict12_full`, `dict12_lzw264`, `transient`, `transient32`, `transient_coop`, `transient_dict0`, `transient_dict12`, `transient_4k`) passaram com `0` falhas (44 checks nos perfis estáticos; 48 checks nos perfis transientes incluindo contadores exatos de heap com preenchimento `0xA5`, injeção determinística de OOM, recuperação pós-OOM, aborto cooperativo por `reset()`/`~AnimatedGIF()`, `close()` idempotente, `open()` com falha e LeakSanitizer ativo), duas checagens em C99 puro com `-Wall -Wextra`, e fuzzing ASan+UBSan (`25000` casos em `minimal+coop` 32 bits + `25000` casos em `fast` + `25000` casos em `transient+coop` 32 bits, além de `5000` casos 64 bits com LeakSanitizer `detect_leaks=1`) com `0` vazamentos e `0` falhas.
 - **Integração drop-in no [`smalltv-pomodoro`](https://github.com/davicorrea0/smalltv-pomodoro)** (`GIF_PROFILE_MINIMAL` + `MAX_WIDTH 480` via `AnimatedGIF_config.h`, `gif_inl.h` no `src/` do sketch, `album.cpp` inalterado):
 
 | Métrica no `smalltv-pomodoro` | Baseline | Com `AnimatedGIF-LowMem` | Diferença |
@@ -223,4 +239,4 @@ Comparação aquecida (`tests/bench.cpp`, callback nulo) entre perfis principais
   - **Cadeias longas com `GIF_FILE_BUF_SIZE` reduzido:** cadeias maiores que `768 B` acionam `GIFEmitChainChunked` em múltiplos passos; combinado com prefixos compactados de 12 bits (`MINIMAL`), eleva o tempo em casos sintéticos extremos como `valid_long_chain` (`~2,19 ms -> ~9,11 ms` no host), embora imagens reais típicas mantenham latência moderada e o modo cooperativo limite cada fatia a ~0,5–0,6 ms.
   - **Orçamento de `decodeStep(budgetUs)`:** é um orçamento cooperativo verificável apenas em fronteiras seguras (entre códigos/linhas), não uma garantia de tempo real em torno de callbacks lentos de SPI/LittleFS/display.
   - **Vendoring dentro de `sketch/src/` no `arduino-cli`:** a etapa de preparação de sketch do `arduino-cli` pode não copiar arquivos `.inl`; ao copiar para `sketch/src/AnimatedGIF/` (em vez de usar `--library`), renomear `gif.inl` para `gif_inl.h` (o fallback `__has_include` em `src/AnimatedGIF.cpp` resolve automaticamente).
-  - **Compatibilidade com `JPEGDEC.h`:** quando `AnimatedGIF.h` é incluído antes de `JPEGDEC.h` na mesma unidade de compilação (observado no `smalltv-pomodoro`), o compilador emite aviso benigno de redefinição de `INTELSHORT`/`INTELLONG` por `JPEGDEC.h` não usar `#ifndef`.
+  - **Compatibilidade com `JPEGDEC.h`:** resolvida com a renomeação das macros leitoras para `GIF_INTELSHORT` / `GIF_INTELLONG` em `src/AnimatedGIF.h` (validado sem avisos sob `-Wall -Wextra -Werror`).

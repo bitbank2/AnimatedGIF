@@ -11,7 +11,8 @@
 //
 // Modified 2026 in AnimatedGIF-LowMem (https://github.com/davicorrea0/AnimatedGIF-LowMem):
 //   - Hardened sequential parser, bounds-checked I/O/LZW decoding, UB-free unaligned reads
-//   - Optional LowMem dictionary/buffer/cooperative profiles (forthcoming commits)
+//   - Optional LowMem, cooperative, and transient per-frame heap profiles + C++ lifecycle safety
+//   - Prefixed GIF_INTELSHORT/GIF_INTELLONG macros to prevent collisions (e.g. with JPEGDEC.h)
 //===========================================================================
 
 #ifndef __ANIMATEDGIF__
@@ -93,8 +94,9 @@
 //   GIF_PROFILE_BALANCED    16-bit prefix + 8-bit suffix, FILE_BUF=768, LZW_BUF=768, no Turbo
 //   GIF_PROFILE_MINIMAL     Packed 12-bit prefix + 8-bit suffix, FILE_BUF=768, LZW_BUF=512, RGB565_ONLY, no Turbo
 //   GIF_PROFILE_COOPERATIVE BALANCED defaults + incremental decodeStep()/decodeLines() API
+//   GIF_PROFILE_TRANSIENT   Resident struct ~676 B; 16-bit prefix + LZW_BUF=1530 allocated per-frame
 //
-#if (defined(GIF_PROFILE_FAST) + defined(GIF_PROFILE_BALANCED) + defined(GIF_PROFILE_MINIMAL) + defined(GIF_PROFILE_COOPERATIVE)) > 1
+#if (defined(GIF_PROFILE_FAST) + defined(GIF_PROFILE_BALANCED) + defined(GIF_PROFILE_MINIMAL) + defined(GIF_PROFILE_COOPERATIVE) + defined(GIF_PROFILE_TRANSIENT)) > 1
 #error "Define at most one GIF_PROFILE_* preset; combine features with GIF_ENABLE_COOPERATIVE=1 etc."
 #endif
 
@@ -158,6 +160,28 @@
 #ifndef GIF_ENABLE_COOPERATIVE
 #define GIF_ENABLE_COOPERATIVE 1
 #endif
+#elif defined(GIF_PROFILE_TRANSIENT)
+#ifndef GIF_TRANSIENT_WORK
+#define GIF_TRANSIENT_WORK 1
+#endif
+#ifndef GIF_DICT_MODE
+#define GIF_DICT_MODE 16
+#endif
+#ifndef GIF_FILE_BUF_SIZE
+#define GIF_FILE_BUF_SIZE 768
+#endif
+#ifndef GIF_LZW_BUF_SIZE
+#define GIF_LZW_BUF_SIZE (6*MAX_CHUNK_SIZE)
+#endif
+#ifndef GIF_RGB565_ONLY
+#define GIF_RGB565_ONLY 1
+#endif
+#ifndef GIF_DISABLE_TURBO
+#define GIF_DISABLE_TURBO 1
+#endif
+#ifndef GIF_LAZY_RESET
+#define GIF_LAZY_RESET 1
+#endif
 #endif
 
 //
@@ -180,6 +204,23 @@
 #endif
 #if GIF_DICT_MODE != 0 && !GIF_LAZY_RESET
 #error "Compact dictionary (GIF_DICT_MODE != 0) requires GIF_LAZY_RESET=1"
+#endif
+
+// Transient per-frame work buffers (1 = allocate LZW/table/line buffers only while decoding, 0 = static in struct)
+#ifndef GIF_TRANSIENT_WORK
+#define GIF_TRANSIENT_WORK 0
+#endif
+
+#if GIF_TRANSIENT_WORK
+#ifndef GIF_MALLOC
+#define GIF_MALLOC(sz) malloc(sz)
+#endif
+#ifndef GIF_CALLOC
+#define GIF_CALLOC(n, sz) calloc((n), (sz))
+#endif
+#ifndef GIF_FREE
+#define GIF_FREE(p) free(p)
+#endif
 #endif
 
 // Palette storage mode (1 = RGB565 LE/BE only, saves 512 B + Flash; 0 = all formats)
@@ -208,15 +249,15 @@
 #define FILE_BUF_SIZE GIF_FILE_BUF_SIZE
 
 #ifndef GIF_DISABLE_TURBO
-#if (GIF_DICT_MODE != 0) || (GIF_FILE_BUF_SIZE < (1<<MAX_CODE_SIZE)) || (GIF_LZW_BUF_SIZE < (6*MAX_CHUNK_SIZE))
+#if (GIF_DICT_MODE != 0) || (GIF_FILE_BUF_SIZE < (1<<MAX_CODE_SIZE)) || (GIF_LZW_BUF_SIZE < (6*MAX_CHUNK_SIZE)) || GIF_TRANSIENT_WORK
 #define GIF_DISABLE_TURBO 1
 #else
 #define GIF_DISABLE_TURBO 0
 #endif
 #endif
 
-#if !GIF_DISABLE_TURBO && ((GIF_DICT_MODE != 0) || (GIF_FILE_BUF_SIZE < (1<<MAX_CODE_SIZE)) || (GIF_LZW_BUF_SIZE < (6*MAX_CHUNK_SIZE)))
-#error "Turbo mode overlays ucLZW across standard usGIFTable/ucGIFPixels/ucLineBuf; set GIF_DISABLE_TURBO=1 when using LowMem dictionary or smaller buffers."
+#if !GIF_DISABLE_TURBO && ((GIF_DICT_MODE != 0) || (GIF_FILE_BUF_SIZE < (1<<MAX_CODE_SIZE)) || (GIF_LZW_BUF_SIZE < (6*MAX_CHUNK_SIZE)) || GIF_TRANSIENT_WORK)
+#error "Turbo mode overlays ucLZW across standard usGIFTable/ucGIFPixels/ucLineBuf; set GIF_DISABLE_TURBO=1 when using LowMem dictionary, smaller buffers, or transient work buffers."
 #endif
 
 // Optional cooperative incremental frame decoding API (adds ~20 bytes to GIFIMAGE)
@@ -240,6 +281,23 @@ enum {
 // expanded LZW buffer for Turbo mode
 #define LZW_BUF_SIZE_TURBO (LZW_BUF_SIZE + (2<<MAX_CODE_SIZE) + (PIXEL_LAST*2) + MAX_WIDTH)
 #define LZW_HIGHWATER_TURBO ((LZW_BUF_SIZE_TURBO * 14) / 16)
+
+// Exact work-buffer byte sizes (safe across static and transient pointer layouts)
+#define GIF_TABLE_BYTES ((size_t)(1U << MAX_CODE_SIZE) * sizeof(uint16_t))
+#if GIF_DICT_MODE == 0
+#define GIF_PIXELS_BYTES ((size_t)(PIXEL_LAST * 2))
+#else
+#define GIF_PIXELS_BYTES ((size_t)(1U << MAX_CODE_SIZE))
+#endif
+#if GIF_DICT_MODE == 12
+#define GIF_PREFIX12_BYTES ((size_t)(((1U << MAX_CODE_SIZE) * 3U + 1U) / 2U))
+#endif
+#if GIF_RGB565_ONLY
+#define GIF_PAL_BYTES ((size_t)MAX_COLORS * sizeof(uint16_t))
+#else
+#define GIF_PAL_BYTES ((size_t)((MAX_COLORS * 3) / 2) * sizeof(uint16_t))
+#endif
+#define GIF_SMALL_WORK_BYTES (GIF_PAL_BYTES + (size_t)LZW_BUF_SIZE + (size_t)(MAX_WIDTH + 15))
 
 //
 // Pixel types
@@ -361,6 +419,27 @@ typedef struct gif_image_tag
     unsigned char *pTurboBuffer;
 #endif
     unsigned char *pPixels, *pOldPixels;
+#if GIF_TRANSIENT_WORK
+#if GIF_RGB565_ONLY
+    uint16_t pPalette[MAX_COLORS];
+#else
+    unsigned short pPalette[(MAX_COLORS * 3)/2]; // can hold RGB565 or RGB888 - set in begin()
+#endif
+    int iLocalPalSize, iGlobalPalSize;
+    // Per-frame transient work buffers (allocated during decode, freed immediately after)
+    uint8_t *ucFileBuf;
+    void *pSmallWork;
+    uint16_t *pLocalPalette;
+    uint8_t *ucLZW;
+    uint8_t *ucLineBuf;
+#if GIF_DICT_MODE == 12
+    uint8_t *ucGIFPrefix12;
+    uint8_t *ucGIFPixels;
+#else
+    uint16_t *usGIFTable;
+    uint8_t *ucGIFPixels;
+#endif
+#else // !GIF_TRANSIENT_WORK
     unsigned char ucFileBuf[FILE_BUF_SIZE]; // holds temp data and pixel expansion stack
 #if GIF_RGB565_ONLY
     uint16_t pPalette[MAX_COLORS];
@@ -396,6 +475,7 @@ typedef struct gif_image_tag
 #endif
     uint8_t ucLineBuf[MAX_WIDTH+15]; // current line
 #endif
+#endif // GIF_TRANSIENT_WORK
     uint8_t *pLineBufAligned;
 #if GIF_ENABLE_COOPERATIVE
     // Compact incremental LZW state (~20 bytes) preserved across decodeStep()/decodeLines()
@@ -412,6 +492,10 @@ typedef struct gif_image_tag
 class AnimatedGIF
 {
   public:
+    AnimatedGIF() { memset(&_gif, 0, sizeof(_gif)); }
+    ~AnimatedGIF() { close(); }
+    AnimatedGIF(const AnimatedGIF &) = delete;
+    AnimatedGIF &operator=(const AnimatedGIF &) = delete;
     int open(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw);
     int openFLASH(uint8_t *pData, int iDataSize, GIF_DRAW_CALLBACK *pfnDraw);
 #ifdef __LINUX__
@@ -489,7 +573,7 @@ class AnimatedGIF
 #endif // 64 vs 32-bit native register size
 
 // Portable, strict-aliasing and alignment-safe little-endian readers
-#define INTELSHORT(p) ((uint16_t)((uint16_t)((const uint8_t *)(p))[0] | ((uint16_t)((const uint8_t *)(p))[1] << 8)))
-#define INTELLONG(p) ((uint32_t)((uint32_t)((const uint8_t *)(p))[0] | ((uint32_t)((const uint8_t *)(p))[1] << 8) | ((uint32_t)((const uint8_t *)(p))[2] << 16) | ((uint32_t)((const uint8_t *)(p))[3] << 24)))
+#define GIF_INTELSHORT(p) ((uint16_t)((uint16_t)((const uint8_t *)(p))[0] | ((uint16_t)((const uint8_t *)(p))[1] << 8)))
+#define GIF_INTELLONG(p) ((uint32_t)((uint32_t)((const uint8_t *)(p))[0] | ((uint32_t)((const uint8_t *)(p))[1] << 8) | ((uint32_t)((const uint8_t *)(p))[2] << 16) | ((uint32_t)((const uint8_t *)(p))[3] << 24)))
 
 #endif // __ANIMATEDGIF__

@@ -20,7 +20,7 @@
 //
 // Modified 2026 in AnimatedGIF-LowMem (https://github.com/davicorrea0/AnimatedGIF-LowMem):
 //   - Input validation, safe allocation arithmetic, checked getComment()
-//   - Compile-time Turbo-disable stubs and optional cooperative incremental API
+//   - Compile-time Turbo-disable stubs, transient work RAII, and idempotent close()
 //   - Supports both gif.inl (library) and gif_inl.h (sketch src/ vendoring)
 //===========================================================================
 #include "AnimatedGIF.h"
@@ -287,20 +287,32 @@ int AnimatedGIF::open(const char *szFilename, GIF_OPEN_CALLBACK *pfnOpen, GIF_CL
     _gif.pfnSeek = pfnSeek;
     _gif.pfnDraw = pfnDraw;
     _gif.pfnOpen = pfnOpen;
-    _gif.pfnClose = pfnClose;
+    _gif.pfnClose = NULL;
     _gif.GIFFile.fHandle = (*pfnOpen)(szFilename, &_gif.GIFFile.iSize);
     if (_gif.GIFFile.fHandle == NULL) {
        _gif.iError = GIF_FILE_NOT_OPEN;
        return 0;
     }
+    _gif.pfnClose = pfnClose;
     return GIFInit(&_gif);
 
 } /* open() */
 
 void AnimatedGIF::close()
 {
-    if (_gif.pfnClose)
-        (*_gif.pfnClose)(_gif.GIFFile.fHandle);
+    if (_gif.pfnClose) {
+        GIF_CLOSE_CALLBACK *fn = _gif.pfnClose;
+        void *handle = _gif.GIFFile.fHandle;
+        _gif.pfnClose = NULL;
+        _gif.GIFFile.fHandle = NULL;
+        (*fn)(handle);
+    }
+#if GIF_TRANSIENT_WORK
+    GIFWorkEnd(&_gif);
+#endif
+#if GIF_ENABLE_COOPERATIVE
+    _gif.ucCoopState = 0;
+#endif
 } /* close() */
 
 void AnimatedGIF::reset()
@@ -309,14 +321,22 @@ void AnimatedGIF::reset()
 #if GIF_ENABLE_COOPERATIVE
     _gif.ucCoopState = 0;
 #endif
+#if GIF_TRANSIENT_WORK
+    GIFWorkEnd(&_gif);
+#endif
     (*_gif.pfnSeek)(&_gif.GIFFile, 0);
 } /* reset() */
 
 void AnimatedGIF::begin(unsigned char ucPaletteType)
 {
+#if !GIF_TRANSIENT_WORK
 uint8_t *p;
 uint32_t u32;
+#endif
 
+#if GIF_TRANSIENT_WORK
+    GIFWorkEnd(&_gif);
+#endif
     memset(&_gif, 0, sizeof(_gif));
 #if GIF_RGB565_ONLY
     if (ucPaletteType != GIF_PALETTE_RGB565_LE && ucPaletteType != GIF_PALETTE_RGB565_BE)
@@ -328,6 +348,7 @@ uint32_t u32;
     _gif.ucPaletteType = ucPaletteType;
     _gif.ucDrawType = GIF_DRAW_RAW; // assume RAW pixel handling
     _gif.pFrameBuffer = NULL;
+#if !GIF_TRANSIENT_WORK
     p = &_gif.ucLineBuf[0];
     u32 = (uint32_t)(intptr_t)p;
     u32 &= 15; // align on 16-byte boundary
@@ -335,6 +356,7 @@ uint32_t u32;
         p += (16-u32);
     }
     _gif.pLineBufAligned = p;
+#endif
 } /* begin() */
 //
 // Play a single frame
@@ -347,6 +369,19 @@ int AnimatedGIF::playFrame(bool bSync, int *delayMilliseconds, void *pUser)
 int rc;
 #if !defined( __MACH__ ) && !defined( __LINUX__ )
 long lTime = millis();
+#endif
+#if GIF_TRANSIENT_WORK
+    struct GifWorkGuard {
+        GIFIMAGE *g;
+        explicit GifWorkGuard(GIFIMAGE *p) : g(p) {}
+        ~GifWorkGuard() { GIFWorkEnd(g); }
+    };
+    if (!GIFWorkBegin(&_gif)) {
+        if (delayMilliseconds)
+            *delayMilliseconds = 0;
+        return -1;
+    }
+    GifWorkGuard workGuard(&_gif);
 #endif
 
     if (_gif.GIFFile.iPos >= _gif.GIFFile.iSize-1) // no more data exists
@@ -383,6 +418,9 @@ long lTime = millis();
         }
         return -1; // error parsing the frame info, we may be at the end of the file
     }
+#if GIF_TRANSIENT_WORK
+    GIFWorkEnd(&_gif); // release transient heap before blocking sync delay()
+#endif
     // Return 1 for more frames or 0 if this was the last frame
     if (bSync)
     {

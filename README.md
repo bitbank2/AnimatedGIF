@@ -15,6 +15,8 @@ Licensed under Apache-2.0 with original BitBank Software, Inc. copyright and att
   - `12` (`MINIMAL`): 12-bit packed prefixes (2 entries per 3 bytes) + 8-bit suffix (10240 B, `-6144 B`), preserving **full 12-bit (4096-code) GIF compatibility**.
 - **Buffer & palette tuning**: configurable `GIF_FILE_BUF_SIZE` (down to `768 B`, with multi-pass chunked stack fallback `GIFEmitChainChunked` for chains up to `32767` px), `GIF_LZW_BUF_SIZE` (`1530 B` down to `260 B`), and `GIF_RGB565_ONLY=1` (`1024 B` palettes instead of `1536 B`).
 - **Optional cooperative incremental decoding (`GIF_ENABLE_COOPERATIVE=1`)**: `beginFrame()`, `decodeStep(budgetUs)`, `decodeLines(maxLines)`, and `frameComplete()` (plus C equivalents `GIF_beginFrame`, `GIF_decodeStep`, `GIF_decodeLines`, `GIF_frameComplete`) returning `GIFDecodeStatus` (`GIF_DECODE_MORE`, `GIF_DECODE_FRAME_DONE`, `GIF_DECODE_END`, `GIF_DECODE_ERR`) so callers can yield to Wi-Fi/HTTP/RTOS between steps.
+- **Optional transient per-frame work buffers (`GIF_PROFILE_TRANSIENT` / `GIF_TRANSIENT_WORK=1`)**: keeps resident `GIFIMAGE`/`AnimatedGIF` at **`664 B`** on ESP8266 (`-97.3%`), allocates LZW/expansion/line buffers only while decoding (`15,593 B` peak default across 4 blocks `<= 8,192 B`, or `18,921 B` with `GIF_FILE_BUF_SIZE=4096`), keeps `open()` / `getInfo()` / `getComment()` at `0 B` heap via a 48 B stack palette batch fallback, supports overridable `GIF_MALLOC`/`GIF_CALLOC`/`GIF_FREE` hooks, C99, and cooperative decoding (freeing buffers automatically at frame completion, `reset()`, `close()`, or destruction).
+- **C++ lifecycle & macro hygiene**: zero-initializing `AnimatedGIF()` default constructor, RAII destructor `~AnimatedGIF()`, deleted copy constructor/assignment (`= delete`), idempotent `close()` / `GIF_close()`, safe `pfnClose` clearing when `pfnOpen`/`fopen` fails, and prefixed `GIF_INTELSHORT` / `GIF_INTELLONG` macros preventing collisions with sibling headers such as `JPEGDEC.h`.
 - **Project-wide config hook**: `AnimatedGIF.h` automatically includes `"AnimatedGIF_config.h"` when present (`__has_include`) so every translation unit shares the exact same `GIFIMAGE` / `AnimatedGIF` ABI.
 
 ## Compile-Time Profiles (Measured on ESP8266)
@@ -24,12 +26,17 @@ Measured with `arduino-cli` (`esp8266:esp8266:generic:eesz=4M2M,xtal=160,ip=lm2n
 | Profile / Flags | `sizeof(AnimatedGIF)` | Delta vs Upstream | Static DRAM (`DATA+RODATA+BSS`) | Flash (`IROM`) | Sketch `.bin` |
 |---|---:|---:|---:|---:|---:|
 | Upstream (`17a6a2ed`) | 24,172 B | — | 52,228 B | 232,292 B | 265,856 B |
-| `GIF_PROFILE_FAST` (default) | 24,172 B | 0 B | 52,232 B | 232,548 B | 266,112 B |
-| `GIF_PROFILE_BALANCED` | 15,980 B | -8,192 B (-33.9%) | 44,040 B | 231,108 B | 264,672 B |
-| `GIF_PROFILE_MINIMAL` | 13,164 B | -11,008 B (-45.5%) | 41,224 B | 230,260 B | 263,824 B |
-| `GIF_PROFILE_MINIMAL` + `MAX_WIDTH=240` | 12,924 B | -11,248 B (-46.5%) | 40,984 B | 230,260 B | 263,824 B |
-| `GIF_PROFILE_COOPERATIVE` | 16,000 B | -8,172 B (-33.8%) | 44,064 B | 231,396 B | 264,976 B |
-| `GIF_PROFILE_MINIMAL` + `GIF_ENABLE_COOPERATIVE=1` | 13,184 B | -10,988 B (-45.5%) | 41,248 B | 230,548 B | 264,128 B |
+| `GIF_PROFILE_FAST` (default) | 24,172 B | 0 B | 52,232 B | 232,676 B | 266,240 B |
+| `GIF_PROFILE_BALANCED` | 15,980 B | -8,192 B (-33.9%) | 44,040 B | 231,236 B | 264,800 B |
+| `GIF_PROFILE_MINIMAL` | 13,164 B | -11,008 B (-45.5%) | 41,224 B | 230,372 B | 263,936 B |
+| `GIF_PROFILE_MINIMAL` + `MAX_WIDTH=240` | 12,924 B | -11,248 B (-46.5%) | 40,984 B | 230,372 B | 263,936 B |
+| `GIF_PROFILE_COOPERATIVE` | 16,000 B | -8,172 B (-33.8%) | 44,064 B | 231,556 B | 265,136 B |
+| `GIF_PROFILE_MINIMAL` + `GIF_ENABLE_COOPERATIVE=1` | 13,184 B | -10,988 B (-45.5%) | 41,248 B | 230,676 B | 264,256 B |
+| `GIF_PROFILE_TRANSIENT` | 664 B | -23,508 B (-97.3%) | 28,728 B | 230,436 B | 264,000 B |
+| `GIF_PROFILE_TRANSIENT` + `GIF_FILE_BUF_SIZE=4096` | 664 B | -23,508 B (-97.3%) | 28,728 B | 230,452 B | 264,016 B |
+| `GIF_PROFILE_TRANSIENT` + `GIF_ENABLE_COOPERATIVE=1` | 684 B | -23,488 B (-97.2%) | 28,744 B | 230,756 B | 264,336 B |
+
+> Note: `GIF_PROFILE_TRANSIENT` keeps only `664 B` (`684 B` with cooperative) resident between frames and allocates `15,593 B` (`18,921 B` with `GIF_FILE_BUF_SIZE=4096`, max contiguous block `8,192 B`) transiently during frame decode only, whereas all other profiles perform `0` dynamic heap allocations.
 
 ### Configuration (`AnimatedGIF_config.h` & Sketch `src/` Vendoring)
 
@@ -70,8 +77,8 @@ Validated as a drop-in replacement inside [`smalltv-pomodoro`](https://github.co
 ## Running Tests & Benchmarks
 
 ```bash
-# Host C++ ASan/UBSan test matrix (11 profiles), C99 build check, and fuzzing (Linux/WSL)
-bash tests/run_tests.sh 50000
+# Host C++ ASan/UBSan test matrix (17 profiles), C99 build check, and fuzzing (Linux/WSL)
+bash tests/run_tests.sh 25000
 
 # Host -O2 benchmark example
 g++ -O2 -std=c++11 -DGIF_PROFILE_COOPERATIVE tests/bench.cpp -o /tmp/bench
