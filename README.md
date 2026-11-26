@@ -74,6 +74,23 @@ Validated as a drop-in replacement inside [`smalltv-pomodoro`](https://github.co
 - ESP8266 firmware `IROM`: `544,340 B -> 542,692 B` (`-1,648 B`); `.bin`: `585,248 B -> 583,600 B`; `.bin.gz`: `431,538 B -> 430,287 B`
 - Pixel-for-pixel regression (`sim/test-gif.sh`): identical frame counts, line counts, and FNV-1a hashes (`ff_240.gif` `framebuffer=81996386` / `all_rows=53363a1a`, `ff_small.gif` `framebuffer=b2d1cdd0` / `all_rows=6ac915c3`), `100,000` RAM + `100,000` callback ASan fuzz cases with `0` failures, and `sim/testes.sh` passing cleanly.
 
+## Smooth Playback on ESP8266 + ST7789 (`examples/esp8266_st7789_player`)
+
+Measured in `smalltv-pomodoro` on a 240x240 ST7789 at 40 MHz SPI (November 2026), with the decoder using 16-bit LZW prefixes and per-frame transient buffers. Most of the remaining cost is on the drawing side, so the example shows the player patterns that made the difference:
+
+- **Schedule from the due time, not from the end of drawing.** With `playFrame(false, &delayMs)`, writing `next = millis() + delayMs` after the frame adds the draw time to every frame. A full-screen frame that takes 35 ms with a 40 ms delay then plays every 75 ms (~53% speed). Scheduling from the previous due time, with a small minimum gap for the rest of `loop()`, played four test GIFs at 98–105% of their requested rate. (`playFrame(true, ...)` already subtracts the decode time.)
+- **One SPI address window per opaque frame** instead of one per row, and **integer upscaling** for small GIFs (80x80 → 3x), computed once per row and sent `scale` times.
+- **Optional lossy-noise cleanup:** near-black palette entries (R, G, B ≤ 12) become black, and a pixel very different from two similar horizontal neighbours takes their colour. It only runs when the frame's palette has those near-black entries, so clean pixel art is drawn unchanged. A 768-byte colour table built once per frame keeps it cheap. Allocate it when the GIF is opened, before the per-frame buffers.
+
+| Test GIF | Requested per frame | Draw time | Played at |
+|---|---|---|---|
+| 80x80 lossy, scaled 3x | 40 ms | ~35 ms | 41 ms |
+| 271x271 lossy (cropped) | 80 ms | ~57 ms | 79 ms |
+| 240x240 | 70 ms | ~37 ms | 70 ms |
+| 80x80, scaled 3x | 100 ms | ~37 ms | 95 ms |
+
+A full 240x240 frame cannot beat roughly 23 ms of SPI transfer at 40 MHz in RGB565, so GIFs asking for less than ~35 ms per full-screen frame will still play slower than requested.
+
 ## Running Tests & Benchmarks
 
 ```bash
